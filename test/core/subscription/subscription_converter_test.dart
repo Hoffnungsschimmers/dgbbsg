@@ -89,7 +89,7 @@ void main() {
       // 让它返回订阅明文：
       Future<String> fetchWithBody(String url, {String label = ''}) async => sub;
 
-      final (nodes, src) = await convertSubscriptions(
+      final nodes = await convertSubscriptions(
         AppConfig(subInputMode: 'url', subUrls: const ['https://my.sub/abcd']),
         fetch: fetchWithBody,
         resolve: fakeResolve,
@@ -105,7 +105,7 @@ void main() {
       // 因此保留两条。仅同 ip:port#cc 才折叠为一条。
       final cfg2 = AppConfig(subInputMode: 'url', subUrls: const ['https://my.sub/abcd']);
       Future<String?> dupResolve(String host) async => '9.9.9.9';
-      final (nodes2, _) = await convertSubscriptions(
+      final nodes2 = await convertSubscriptions(
         cfg2,
         fetch: fetchWithBody,
         resolve: dupResolve,

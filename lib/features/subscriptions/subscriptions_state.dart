@@ -13,6 +13,7 @@ import '../../core/github/github_push.dart';
 import '../../core/latency/latency_filter.dart';
 import '../../core/latency/latency_prober.dart';
 import '../../core/net/ip.dart';
+import '../../core/net/proxy.dart';
 import '../../core/net/retry.dart';
 import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
@@ -132,11 +133,11 @@ class LatencyProgress {
 }
 
 /// 延迟优选完成后的结果摘要（供 RunTab 显示 3 秒后自动消失）。
-class LatencyResult {
+class LatencySummary {
   final int tested;
   final int connected;
   final int kept;
-  const LatencyResult({required this.tested, required this.connected, required this.kept});
+  const LatencySummary({required this.tested, required this.connected, required this.kept});
 }
 
 /// 订阅器状态：含运行中标记、当前动作类型、延迟优选进度。
@@ -144,9 +145,9 @@ class SubscriptionsState {
   final bool running;
   final LatencyProgress? progress;
   final RunAction? currentAction;
-  final LatencyResult? lastResult;
+  final LatencySummary? lastResult;
   SubscriptionsState({this.running = false, this.progress, this.currentAction, this.lastResult});
-  SubscriptionsState copyWith({bool? running, LatencyProgress? progress, bool clearProgress = false, RunAction? currentAction, bool clearAction = false, LatencyResult? lastResult, bool clearResult = false}) =>
+  SubscriptionsState copyWith({bool? running, LatencyProgress? progress, bool clearProgress = false, RunAction? currentAction, bool clearAction = false, LatencySummary? lastResult, bool clearResult = false}) =>
       SubscriptionsState(
         running: running ?? this.running,
         progress: clearProgress ? null : (progress ?? this.progress),
@@ -167,7 +168,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   }
 
   /// Windows 系统代理地址（如 '127.0.0.1:10808'），无代理时为空。
-  static final String? _systemProxy = _readWindowsProxy();
+  static final String? _systemProxy = readWindowsSystemProxy();
 
   /// 长生命周期安全 Dio（走系统代理、校验 TLS 证书）。
   final dio_pkg.Dio _dioSafe = GithubPush.directDio();
@@ -178,18 +179,21 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   late final dio_pkg.Dio _dioInsecure = (() {
     final d = GithubPush.directDio();
     // 复用 _dioSafe 的代理配置（directDio 已自动读取 Windows 系统代理）
-    final safeAdapter = _dioSafe.httpClientAdapter;
-    if (safeAdapter is IOHttpClientAdapter && safeAdapter.createHttpClient != null) {
-      final safeFactory = safeAdapter.createHttpClient!;
-      (d.httpClientAdapter as IOHttpClientAdapter).createHttpClient = () {
-        final client = safeFactory();
-        client.badCertificateCallback = (_, _, _) => true;
-        return client;
-      };
-    } else {
-      (d.httpClientAdapter as dynamic).createHttpClient = () {
-        return HttpClient()..badCertificateCallback = (_, _, _) => true;
-      };
+    final adapter = d.httpClientAdapter;
+    if (adapter is IOHttpClientAdapter) {
+      final safeAdapter = _dioSafe.httpClientAdapter;
+      if (safeAdapter is IOHttpClientAdapter && safeAdapter.createHttpClient != null) {
+        final safeFactory = safeAdapter.createHttpClient!;
+        adapter.createHttpClient = () {
+          final client = safeFactory();
+          client.badCertificateCallback = (_, _, _) => true;
+          return client;
+        };
+      } else {
+        adapter.createHttpClient = () {
+          return HttpClient()..badCertificateCallback = (_, _, _) => true;
+        };
+      }
     }
     return d;
   })();
@@ -204,9 +208,9 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     final cfg = await _cfg();
     final parser = await ref.read(nodeParserProvider.future);
     final logger = ref.read(subLoggerProvider);
-    logger.info('开始「订阅IP」转换');
+    logger.info('开始「订阅IP」转换…');
     try {
-      final (nodes, _) = await convertSubscriptions(
+      final nodes = await convertSubscriptions(
         cfg,
         fetch: (url, {label = ''}) {
           if (_cancelRequested) return Future.value('');
@@ -220,12 +224,12 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       if (_cancelRequested) {
         logger.info('「订阅IP」已取消');
       } else if (nodes.isEmpty) {
-        logger.info('订阅转换无可用节点（请检查 subGenerators/subUrls 配置）');
+        logger.warning('订阅转换无可用节点（请检查 subGenerators/subUrls 配置）');
       } else {
         final outPath = await _resolve(cfg.subOutputFile);
         await writeSubOutput(nodes, outPath);
         await ref.read(resultProvider.notifier).loadFile(outPath);
-        logger.info('订阅IP转换完成：${nodes.length} 个节点 -> $outPath');
+        logger.success('订阅IP转换完成：${nodes.length} 个节点 -> $outPath');
       }
     } catch (e) {
       logger.error(e.toString());
@@ -261,7 +265,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     try {
       final nodes = await _readNodes(await _resolve(cfg.subOutputFile));
       if (nodes.isEmpty) {
-        logger.info('未找到订阅IP文件（${cfg.subOutputFile}），请先运行「订阅IP」');
+        logger.warning('未找到订阅IP文件（${cfg.subOutputFile}），请先运行「订阅IP」');
       } else {
         final latencyOut = await _resolve(cfg.subLatencyOutputFile);
         final (kept, tested, connected) = await LatencyFilter.run(
@@ -294,9 +298,9 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         if (_cancelRequested) {
           logger.info('延迟优选已取消（已完成 $tested 个探测）');
         } else {
-          logger.info('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
+          logger.success('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
         }
-        state = state.copyWith(lastResult: LatencyResult(tested: tested, connected: connected, kept: kept.length));
+        state = state.copyWith(lastResult: LatencySummary(tested: tested, connected: connected, kept: kept.length));
         await ref.read(resultProvider.notifier).loadFile(latencyOut);
       }
     } catch (e) {
@@ -325,7 +329,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   Future<(bool, int, String)> pushFile(String file) async {
     if (!GithubPush.isPushable(file)) {
       final m = '仅支持推送后缀为 _top.txt 的优选结果文件（当前：$file）';
-      ref.read(subLoggerProvider).info(m);
+      ref.read(subLoggerProvider).warning(m);
       return (false, 0, m);
     }
     final cfg = await _cfg();
@@ -333,7 +337,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     final github = _github(cfg);
     if (github == null) {
       final m = 'GitHub 未配置（请在设置填写 Token/Repo/Branch），跳过推送：$file';
-      logger.info(m);
+      logger.warning(m);
       return (false, 0, m);
     }
     // 解析为绝对路径（文件写入文档目录，相对路径需拼接）
@@ -347,7 +351,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       final content = await File(resolved).readAsString();
       logger.info('开始推送 $file 到 GitHub（${cfg.githubRepo}@${cfg.githubBranch}）…');
       final code = await github.pushFile(file, content, message: 'update $file');
-      logger.info('已推送 $file (HTTP $code)');
+      logger.success('已推送 $file (HTTP $code)');
       return (true, code, '已推送 $file (HTTP $code)');
     } catch (e) {
       final m = '推送 $file 失败：$e';
@@ -378,10 +382,17 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         receiveTimeoutSec: cfg.subFetchTimeout,
         maxRetries: cfg.subFetchMaxRetries.clamp(0, 10),
         retryDelayMs: (cfg.subFetchRetryDelay * 1000).round(),
-        onLog: (m) => logger.info('$tag$m'),
+        onLog: (m) {
+          // 重试消息语义为警告，其余保持 info
+          if (m.contains('↻ 重试')) {
+            logger.warning('$tag$m');
+          } else {
+            logger.info('$tag$m');
+          }
+        },
       );
       final len = content.length;
-      logger.info('$tag✓ 成功（${len > 100 ? '$len 字符' : len > 0 ? '内容 $len 字符' : '空响应'}）');
+      logger.success('$tag✓ 成功（${len > 100 ? '$len 字符' : len > 0 ? '内容 $len 字符' : '空响应'}）');
       return content;
     } catch (e) {
       logger.error('$tag✗ 失败：${classifyFetchError(e, url)}');
@@ -410,31 +421,6 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         .toList();
   }
 
-  /// 从 Windows 注册表读取系统代理地址。
-  static String? _readWindowsProxy() {
-    if (!Platform.isWindows) return null;
-    try {
-      final enableResult = Process.runSync(
-        'reg', ['query',
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyEnable'],
-      );
-      final enableMatch = RegExp(r'ProxyEnable\s+REG_DWORD\s+0x(\d+)').firstMatch(enableResult.stdout.toString());
-      if (enableMatch == null || enableMatch.group(1) == '0') return null;
-
-      final serverResult = Process.runSync(
-        'reg', ['query',
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyServer'],
-      );
-      final serverMatch = RegExp(r'ProxyServer\s+REG_SZ\s+(.+)').firstMatch(serverResult.stdout.toString());
-      if (serverMatch == null) return null;
-      final proxy = serverMatch.group(1)!.trim();
-      return proxy.isNotEmpty ? proxy : null;
-    } catch (_) {
-      return null;
-    }
-  }
 }
 
 final subProvider = StateNotifierProvider<SubscriptionsNotifier, SubscriptionsState>(

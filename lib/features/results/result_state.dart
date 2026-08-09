@@ -7,6 +7,12 @@ import 'package:cfnb_app/core/net/ip.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
+/// 从 "50.00 ms" 或 "50.00ms" 提取数值。统一的延迟解析函数。
+double? parseLatency(String? s) {
+  if (s == null) return null;
+  return double.tryParse(s.replaceAll(RegExp(r'[^0-9.]'), ''));
+}
+
 /// 结果行（对应旧版 ResultsPanel 的表格行）。
 /// 兼容新旧格式：`ip:port#CC source` 或 `ip:port#CC@source`
 class ResultRow {
@@ -150,25 +156,6 @@ class ResultNotifier extends StateNotifier<ResultState> {
     state = state.copyWith(rows: rows, sourceLabel: label);
   }
 
-  Map<String, int> geoDistribution() {
-    final map = <String, int>{};
-    for (final r in state.rows) {
-      final c = r.country.isEmpty ? '未知' : r.country;
-      map[c] = (map[c] ?? 0) + 1;
-    }
-    return map;
-  }
-
-  double? lowestLatency() {
-    double? low;
-    for (final r in state.rows) {
-      if (r.latency == null) continue;
-      final v = double.tryParse(r.latency!.replaceAll(RegExp(r'[^0-9.]'), ''));
-      if (v != null && (low == null || v < low)) low = v;
-    }
-    return low;
-  }
-
   /// 删除指定索引的节点。
   void removeRow(int index) {
     final rows = [...state.rows];
@@ -176,6 +163,16 @@ class ResultNotifier extends StateNotifier<ResultState> {
       rows.removeAt(index);
       state = state.copyWith(rows: rows);
     }
+  }
+
+  /// 更新指定索引的节点行。
+  void updateRow(int index, String rawLine) {
+    final line = rawLine.trim();
+    if (line.isEmpty || !line.contains(':')) return;
+    if (index < 0 || index >= state.rows.length) return;
+    final rows = [...state.rows];
+    rows[index] = ResultRow(line, state.rows[index].latency);
+    state = state.copyWith(rows: rows);
   }
 
   /// 添加一个节点行（原始格式：ip:port#CC source）。

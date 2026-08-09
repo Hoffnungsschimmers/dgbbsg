@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:collection';
 
 /// 内存环形日志缓冲 + 流。UI 通过 Stream 订阅，按节流批量刷新，避免卡顿。
+/// 使用 ListQueue 实现 O(1) 的头部淘汰（相比 List.removeAt(0) 的 O(n)）。
 class AppLogger {
   final int maxLines;
-  final _buffer = <String>[];
+  final _buffer = ListQueue<String>();
   final _controller = StreamController<String>.broadcast();
   final _clearController = StreamController<void>.broadcast();
   bool _disposed = false;
@@ -17,14 +19,16 @@ class AppLogger {
 
   void log(String line) {
     if (_disposed) return;
-    _buffer.add(line);
+    _buffer.addLast(line);
     if (_buffer.length > maxLines) {
-      _buffer.removeAt(0);
+      _buffer.removeFirst();
     }
     _controller.add(line);
   }
 
   void info(String m) => log(m);
+  void warning(String m) => log('[警告] $m');
+  void success(String m) => log('[成功] $m');
   void error(String m) => log('[错误] $m');
 
   void clear() {

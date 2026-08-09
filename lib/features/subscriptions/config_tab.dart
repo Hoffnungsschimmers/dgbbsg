@@ -15,7 +15,7 @@ class ConfigTab extends ConsumerStatefulWidget {
   ConsumerState<ConfigTab> createState() => _ConfigTabState();
 }
 
-class _ConfigTabState extends ConsumerState<ConfigTab> {
+class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveClientMixin {
   final _genCtl = <TextEditingController>[];
   final _urlCtl = <TextEditingController>[];
   final _hostCtl = TextEditingController();
@@ -31,6 +31,18 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
   AppConfig? _pendingCfg;
   // 同步守卫：程序化设置 ctl.text 时抑制 onChanged → _save 循环。
   bool _isSyncing = false;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 监听配置变化，在 listener 中同步 controller（而非 build()）
+    ref.listenManual(configProvider, (_, next) {
+      next.whenData((cfg) => _syncControllers(cfg));
+    });
+  }
 
   @override
   void dispose() {
@@ -80,6 +92,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
     _syncIf(_tokenCtl, cfg.githubToken);
     _syncIf(_repoCtl, cfg.githubRepo);
     _syncIf(_branchCtl, cfg.githubBranch);
+    _syncIf(_latencyOutCtl, cfg.subLatencyOutputFile);
     _isSyncing = false;
   }
 
@@ -101,15 +114,16 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final cfgAsync = ref.watch(configProvider);
 
     return cfgAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('加载失败: $e')),
       data: (cfg) {
-        _syncControllers(cfg);
-        if (_latencyOutCtl.text != cfg.subLatencyOutputFile) {
-          _latencyOutCtl.text = cfg.subLatencyOutputFile;
+        // 首次加载时同步 controllers（后续通过 ref.listen 自动同步）
+        if (_genCtl.isEmpty && cfg.subGenerators.isNotEmpty) {
+          _syncControllers(cfg);
         }
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -274,6 +288,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
   }
 
   Widget _buildGenerators(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
     final disabled = cfg.subDisabledGenerators;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,12 +308,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
                       list[i] = v;
                       _save(cfg.copyWith(subGenerators: list));
                     },
-                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
                     decoration: inputDecorationFor(context),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
+                  tooltip: disabled.contains(_genName(cfg.subGenerators[i])) ? '启用' : '禁用',
                   icon: Icon(disabled.contains(_genName(cfg.subGenerators[i]))
                       ? Icons.toggle_off : Icons.toggle_on,
                       color: disabled.contains(_genName(cfg.subGenerators[i]))
@@ -315,7 +331,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  tooltip: '删除',
+                  icon: Icon(Icons.delete_outline, color: t.danger),
                   onPressed: () {
                     final list = [...cfg.subGenerators]..removeAt(i);
                     _save(cfg.copyWith(subGenerators: list));
@@ -325,7 +342,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
             ),
           ),
         const SizedBox(height: 4),
-        TextButton.icon(
+        OutlinedButton.icon(
           icon: const Icon(Icons.add),
           label: const Text('添加订阅器'),
           onPressed: () => _save(cfg.copyWith(subGenerators: [...cfg.subGenerators, '名称|域名'])),
@@ -335,6 +352,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
   }
 
   Widget _buildUrls(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -353,12 +371,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
                       list[i] = v;
                       _save(cfg.copyWith(subUrls: list));
                     },
-                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
                     decoration: inputDecorationFor(context),
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
+                  tooltip: cfg.subDisabledUrls.contains(cfg.subUrls[i].trim()) ? '启用' : '禁用',
                   icon: Icon(
                     cfg.subDisabledUrls.contains(cfg.subUrls[i].trim())
                         ? Icons.toggle_off : Icons.toggle_on,
@@ -377,7 +396,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  tooltip: '删除',
+                  icon: Icon(Icons.delete_outline, color: t.danger),
                   onPressed: () {
                     final list = [...cfg.subUrls]..removeAt(i);
                     _save(cfg.copyWith(subUrls: list));
@@ -387,7 +407,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> {
             ),
           ),
         const SizedBox(height: 4),
-        TextButton.icon(
+        OutlinedButton.icon(
           icon: const Icon(Icons.add),
           label: const Text('添加订阅链接'),
           onPressed: () => _save(cfg.copyWith(subUrls: [...cfg.subUrls, ''])),

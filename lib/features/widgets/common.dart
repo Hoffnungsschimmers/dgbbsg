@@ -21,16 +21,44 @@ Widget card(BuildContext context, {required Widget child, EdgeInsets? padding}) 
   );
 }
 
-/// 状态药丸。
+/// 状态药丸。根据背景色亮度自动选择文字颜色。
 Widget pill(BuildContext context, String text, Color bg) {
+  final fg = _contrastColor(bg, context);
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
     decoration: BoxDecoration(
       color: bg,
       borderRadius: BorderRadius.circular(999),
     ),
-    child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+    child: Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
   );
+}
+
+/// 带图标的药丸（emoji/time 等场景替换为 Icon）。
+Widget pillWithIcon(BuildContext context, {required IconData icon, required String text, required Color bg}) {
+  final fg = _contrastColor(bg, context);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: fg),
+        const SizedBox(width: 4),
+        Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: fg)),
+      ],
+    ),
+  );
+}
+
+/// 根据背景色亮度返回白色或主题正文色。
+Color _contrastColor(Color bg, BuildContext context) {
+  // 计算相对亮度（WCAG 公式）
+  final luminance = bg.computeLuminance();
+  return luminance > 0.4 ? AppThemeExt.of(context).text : Colors.white;
 }
 
 class AppButton extends StatelessWidget {
@@ -61,7 +89,7 @@ Widget sectionTitle(BuildContext context, String text) {
   final t = AppThemeExt.of(context);
   return Text(
     text,
-    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textDim),
+    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textDim),
   );
 }
 
@@ -81,26 +109,31 @@ class RawTextView extends StatelessWidget {
       children: [
         SelectionArea(
           child: SingleChildScrollView(
-            padding: padding,
+            padding: EdgeInsets.only(right: 48) + padding,
             child: SelectableText(
               text,
-              style: TextStyle(fontFamily: 'AppMono', fontSize: 12, color: t.text),
+              style: TextStyle(fontFamily: 'AppMono', fontSize: 13, color: t.text),
             ),
           ),
         ),
         Positioned(
           top: 4,
           right: 4,
-          child: IconButton(
-            icon: const Icon(Icons.copy, size: 16),
-            tooltip: copyTooltip ?? '复制全部',
-            color: t.textDim,
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: text));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('已复制'), duration: Duration(seconds: 1)),
-              );
-            },
+          child: Container(
+            decoration: BoxDecoration(
+              color: t.surface.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: t.border),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.copy, size: 16),
+              tooltip: copyTooltip ?? '复制全部',
+              color: t.textDim,
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: text));
+                AppToast.show(context, '已复制');
+              },
+            ),
           ),
         ),
       ],
@@ -156,23 +189,29 @@ class _LogViewState extends State<LogView> {
     final child = _lines.isEmpty
         ? Container(
             alignment: Alignment.center,
-            child: Text(widget.emptyHint ?? '暂无日志', style: TextStyle(color: t.textDim, fontSize: 12)),
+            child: Text(widget.emptyHint ?? '暂无日志', style: TextStyle(color: t.textDim, fontSize: 13)),
           )
         : SelectionArea(
             child: SingleChildScrollView(
               controller: _sc,
-              padding: const EdgeInsets.fromLTRB(8, 40, 8, 8),
+              padding: const EdgeInsets.fromLTRB(8, 48, 48, 8),
               child: SelectableText.rich(
                 TextSpan(
                   children: [
                     for (var i = 0; i < _lines.length; i++) ...[
                       if (i > 0) const TextSpan(text: '\n'),
-                      TextSpan(
+                        TextSpan(
                         text: _lines[i],
                         style: TextStyle(
                           fontFamily: 'AppMono',
-                          fontSize: 12,
-                          color: _lines[i].startsWith('[错误]') ? t.danger : t.logFg,
+                          fontSize: 13,
+                          color: _lines[i].startsWith('[错误]')
+                              ? t.danger
+                              : _lines[i].startsWith('[警告]')
+                                  ? t.warning
+                                  : _lines[i].startsWith('[成功]')
+                                      ? t.success
+                                      : t.logFg,
                           fontWeight: _lines[i].startsWith('[错误]') ? FontWeight.w600 : FontWeight.normal,
                         ),
                       ),
@@ -208,9 +247,7 @@ class _LogViewState extends State<LogView> {
                       ? null
                       : () {
                           Clipboard.setData(ClipboardData(text: _all));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('已复制全部日志'), duration: Duration(seconds: 1)),
-                          );
+                          AppToast.show(context, '已复制全部日志');
                         },
                 ),
                 IconButton(
@@ -244,13 +281,13 @@ Widget labeledTextField(
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(label, style: TextStyle(fontSize: 12, color: t.textDim)),
+      Text(label, style: TextStyle(fontSize: 13, color: t.textDim)),
       const SizedBox(height: 4),
       TextField(
         controller: ctl,
         onChanged: onChanged,
         obscureText: obscure,
-        style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+        style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
         decoration: inputDecorationFor(context),
       ),
     ],
@@ -268,7 +305,7 @@ Widget labeledSwitch(BuildContext context, String label, bool value, ValueChange
   );
 }
 
-/// 统一输入框装饰。
+/// 统一输入框装饰（与 ThemeData.inputDecorationTheme 保持一致）。
 InputDecoration inputDecorationFor(BuildContext context) {
   final t = AppThemeExt.of(context);
   return InputDecoration(
@@ -276,7 +313,7 @@ InputDecoration inputDecorationFor(BuildContext context) {
     filled: true,
     fillColor: t.bg,
     border: OutlineInputBorder(borderRadius: t.radius, borderSide: BorderSide(color: t.border)),
-    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
   );
 }
 
@@ -361,7 +398,7 @@ class _SectionCollapsibleState extends State<SectionCollapsible>
                   Expanded(
                     child: Text(
                       widget.title,
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textDim),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textDim),
                     ),
                   ),
                   RotationTransition(
@@ -377,11 +414,17 @@ class _SectionCollapsibleState extends State<SectionCollapsible>
             curve: Motion.curveStandard,
             alignment: Alignment.topCenter,
             child: _expanded
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: widget.child,
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Divider(height: 1, color: t.border),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                        child: widget.child,
+                      ),
+                    ],
                   )
-                : const SizedBox(width: double.infinity, height: 0),
+                : const SizedBox.shrink(),
           ),
         ],
       ),
@@ -402,7 +445,7 @@ class CountUpText extends StatefulWidget {
     super.key,
     this.decimals = 0,
     this.style,
-    this.duration = const Duration(milliseconds: 300),
+    this.duration = Motion.staggerDur,
     this.suffix,
   });
 
@@ -464,6 +507,16 @@ Widget labeledSliderCountUp(
         ],
       ),
       Slider(value: value, min: min, max: max, activeColor: AppTheme.edgeOrange, onChanged: onChanged),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('${min.round()}', style: TextStyle(fontSize: 11, color: t.textDim)),
+            Text('${max.round()}', style: TextStyle(fontSize: 11, color: t.textDim)),
+          ],
+        ),
+      ),
     ],
   );
 }
@@ -500,6 +553,16 @@ Widget labeledDoubleSliderCountUp(
         divisions: min == max ? null : ((max - min) * 100).round().clamp(1, 1 << 30),
         activeColor: AppTheme.edgeOrange,
         onChanged: onChanged,
+      ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(min.toStringAsFixed(min == min.roundToDouble() ? 0 : 1), style: TextStyle(fontSize: 11, color: t.textDim)),
+            Text(max.toStringAsFixed(max == max.roundToDouble() ? 0 : 1), style: TextStyle(fontSize: 11, color: t.textDim)),
+          ],
+        ),
       ),
     ],
   );
@@ -559,23 +622,25 @@ class _ToastWidget extends StatefulWidget {
   State<_ToastWidget> createState() => _ToastWidgetState();
 }
 
-class _ToastWidgetState extends State<_ToastWidget> {
-  bool _visible = false;
+class _ToastWidgetState extends State<_ToastWidget> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _opacity;
+  late Animation<Offset> _offset;
   Timer? _dismissTimer;
-  Timer? _removeTimer;
 
   @override
   void initState() {
     super.initState();
-    // 进场
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _visible = true);
-    });
+    _ctrl = AnimationController(vsync: this, duration: Motion.durBase);
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Motion.curveStandard);
+    _offset = Tween(begin: const Offset(0, 0.3), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Motion.curveStandard));
+    // 进场动画
+    _ctrl.forward();
     // 自动消失
     _dismissTimer = Timer(widget.duration, () {
       if (!mounted) return;
-      setState(() => _visible = false);
-      _removeTimer = Timer(Motion.durBase, () {
+      _ctrl.reverse().then((_) {
         if (mounted) widget.onDismiss();
       });
     });
@@ -584,24 +649,24 @@ class _ToastWidgetState extends State<_ToastWidget> {
   @override
   void dispose() {
     _dismissTimer?.cancel();
-    _removeTimer?.cancel();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 宽屏（NavigationRail）时用固定底部偏移，窄屏（NavigationBar）时加上导航栏高度
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final isWide = MediaQuery.sizeOf(context).width >= 720;
+    final bottom = viewPadding.bottom + (isWide ? 16.0 : kBottomNavigationBarHeight + 8);
     return Positioned(
-      bottom: 80,
+      bottom: bottom,
       left: 0,
       right: 0,
-      child: AnimatedOpacity(
-        opacity: _visible ? 1.0 : 0.0,
-        duration: Motion.durBase,
-        curve: Motion.curveStandard,
-        child: AnimatedSlide(
-          offset: _visible ? Offset.zero : const Offset(0, 0.3),
-          duration: Motion.durBase,
-          curve: Motion.curveStandard,
+      child: FadeTransition(
+        opacity: _opacity,
+        child: SlideTransition(
+          position: _offset,
           child: Center(
             child: Material(
               color: Colors.transparent,

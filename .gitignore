@@ -184,6 +184,9 @@ CFYXX-*.zip
 test_certificate.pfx
 
 
+# IntelliJ module file (project-specific)
+cfnb_app.iml
+
 # superpowers skill scratch (review packages, ledgers)
 .superpowers/
 

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/motion.dart';
@@ -15,10 +16,27 @@ class RunTab extends ConsumerStatefulWidget {
   ConsumerState<RunTab> createState() => _RunTabState();
 }
 
-class _RunTabState extends ConsumerState<RunTab> {
+class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMixin {
   Timer? _resultDismissTimer;
   bool _showResult = false;
-  LatencyResult? _lastShownResult;
+  LatencySummary? _lastShownResult;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 监听 lastResult 变化，在 listener 中处理副作用（而非 build()）
+    ref.listenManual(subProvider, (prev, next) {
+      if (!next.running && next.lastResult != null && next.lastResult != _lastShownResult) {
+        _lastShownResult = next.lastResult;
+        _showResult = true;
+        _scheduleResultDismiss();
+        if (mounted) setState(() {});
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -35,6 +53,7 @@ class _RunTabState extends ConsumerState<RunTab> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final run = ref.watch(subProvider);
     final subLogger = ref.watch(subLoggerProvider);
     final t = AppThemeExt.of(context);
@@ -42,13 +61,6 @@ class _RunTabState extends ConsumerState<RunTab> {
     final isSubRunning = run.running && run.currentAction == RunAction.subscription;
     final isLatencyRunning = run.running && run.currentAction == RunAction.latency;
     final progress = run.progress;
-
-    // 完成后显示结果摘要卡
-    if (!run.running && run.lastResult != null && run.lastResult != _lastShownResult) {
-      _lastShownResult = run.lastResult;
-      _showResult = true;
-      _scheduleResultDismiss();
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,7 +119,7 @@ class _RunTabState extends ConsumerState<RunTab> {
           alignment: Alignment.topCenter,
           child: (isLatencyRunning && progress != null)
               ? Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: _ProgressCard(progress: progress))
-              : const SizedBox(width: double.infinity, height: 0),
+              : const SizedBox.shrink(),
         ),
         if (isLatencyRunning && progress != null) const SizedBox(height: 8),
 
@@ -119,9 +131,12 @@ class _RunTabState extends ConsumerState<RunTab> {
           child: (_showResult && _lastShownResult != null)
               ? Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: _CompletionCard(result: _lastShownResult!, onDismiss: () => setState(() => _showResult = false)),
+                  child: _CompletionCard(result: _lastShownResult!, onDismiss: () => setState(() => _showResult = false))
+                      .animate()
+                      .fadeIn(duration: Motion.durBase, curve: Motion.curveStandard)
+                      .slideY(begin: 0.15, end: 0, duration: Motion.durBase, curve: Motion.curveStandard),
                 )
-              : const SizedBox(width: double.infinity, height: 0),
+              : const SizedBox.shrink(),
         ),
         if (_showResult && _lastShownResult != null) const SizedBox(height: 8),
 
@@ -154,7 +169,7 @@ class _ProgressButton extends StatelessWidget {
         ),
         Positioned.fill(
           child: Center(
-            child: CountUpText(progress.percent * 100, decimals: 1, suffix: '%',
+            child: Text('${(progress.percent * 100).toStringAsFixed(1)}%',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
           ),
         ),
@@ -173,16 +188,16 @@ class _ProgressCard extends StatelessWidget {
     final t = AppThemeExt.of(context);
     return card(context, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
-        Text('延迟测试', style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w600)),
+        Text('延迟测试', style: TextStyle(fontSize: 13, color: t.textDim, fontWeight: FontWeight.w600)),
         const Spacer(),
-        CountUpText(progress.percent * 100, decimals: 1, suffix: '%',
+        Text('${(progress.percent * 100).toStringAsFixed(1)}%',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.edgeOrange)),
       ]),
       const SizedBox(height: 8),
       Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-        CountUpText(progress.done, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: t.text)),
+        Text('${progress.done}', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: t.text)),
         Text(' / ', style: TextStyle(fontSize: 16, color: t.textDim)),
-        CountUpText(progress.total, style: TextStyle(fontSize: 16, color: t.textDim)),
+        Text('${progress.total}', style: TextStyle(fontSize: 16, color: t.textDim)),
         const Spacer(),
         _miniStat(context, '已连通', progress.connected, t.success),
         const SizedBox(width: 12),
@@ -201,15 +216,15 @@ class _ProgressCard extends StatelessWidget {
   Widget _miniStat(BuildContext context, String label, int value, Color color) {
     final t = AppThemeExt.of(context);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: TextStyle(fontSize: 10, color: t.textDim)),
-      CountUpText(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+      Text(label, style: TextStyle(fontSize: 12, color: t.textDim)),
+      Text('$value', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color)),
     ]);
   }
 }
 
 /// 完成摘要卡。
 class _CompletionCard extends StatelessWidget {
-  final LatencyResult result;
+  final LatencySummary result;
   final VoidCallback onDismiss;
   const _CompletionCard({required this.result, required this.onDismiss});
 
@@ -222,14 +237,14 @@ class _CompletionCard extends StatelessWidget {
           child: Icon(Icons.check_circle, color: t.success, size: 24)),
       const SizedBox(width: 14),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('延迟优选完成', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: t.text)),
+        Text('延迟优选完成', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: t.text)),
         const SizedBox(height: 4),
         Row(children: [
-          Text('测试 ${result.tested}', style: TextStyle(fontSize: 12, color: AppTheme.edgeOrange, fontWeight: FontWeight.w600)),
+          Text('测试 ${result.tested}', style: TextStyle(fontSize: 13, color: AppTheme.edgeOrange, fontWeight: FontWeight.w600)),
           const SizedBox(width: 8),
-          Text('连通 ${result.connected}', style: TextStyle(fontSize: 12, color: t.success, fontWeight: FontWeight.w600)),
+          Text('连通 ${result.connected}', style: TextStyle(fontSize: 13, color: t.success, fontWeight: FontWeight.w600)),
           const SizedBox(width: 8),
-          Text('保留 ${result.kept}', style: TextStyle(fontSize: 12, color: t.text, fontWeight: FontWeight.w600)),
+          Text('保留 ${result.kept}', style: TextStyle(fontSize: 13, color: t.text, fontWeight: FontWeight.w600)),
         ]),
       ])),
       IconButton(icon: Icon(Icons.close, size: 18, color: t.textDim), onPressed: onDismiss),

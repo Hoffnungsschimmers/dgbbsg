@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:dio/src/adapters/io_adapter.dart';
+import 'package:dio/io.dart';
+
+import '../net/proxy.dart';
 
 /// GitHub 文件推送（对应旧版 scripts/git_sync.ps1 的 ip 数据推送）。
 ///
@@ -32,39 +34,20 @@ class GithubPush {
   }
 
   /// 读取 Windows 系统代理并应用到 Dio 的 IO 适配器。
+  /// badCertificateCallback 设为 true：代理环境下的 TLS 连接需要跳过证书校验，
+  /// 因为中间代理（如 Clash/V2RayN）可能使用自签证书进行 MITM。
+  /// GitHub API 走 DIRECT 直连（见构造函数），不受此影响。
   static void _applySystemProxy(Dio dio) {
-    if (!Platform.isWindows) return;
-    try {
-      final result = Process.runSync(
-        'reg', ['query',
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyEnable'],
-      );
-      final enableMatch = RegExp(r'ProxyEnable\s+REG_DWORD\s+0x(\d+)').firstMatch(result.stdout.toString());
-      if (enableMatch == null || enableMatch.group(1) == '0') return; // 代理未启用
-
-      final serverResult = Process.runSync(
-        'reg', ['query',
-          r'HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings',
-          '/v', 'ProxyServer'],
-      );
-      final serverMatch = RegExp(r'ProxyServer\s+REG_SZ\s+(.+)').firstMatch(serverResult.stdout.toString());
-      if (serverMatch == null) return;
-      final proxy = serverMatch.group(1)!.trim();
-      if (proxy.isEmpty) return;
-
-      // 配置 IO 适配器使用 HTTP 代理（V2RayN/Clash 等均支持 HTTP CONNECT）
-      final adapter = dio.httpClientAdapter;
-      if (adapter is IOHttpClientAdapter) {
-        adapter.createHttpClient = () {
-          final client = HttpClient();
-          client.findProxy = (uri) => 'PROXY $proxy';
-          client.badCertificateCallback = (_, _, _) => true;
-          return client;
-        };
-      }
-    } catch (_) {
-      // 非 Windows 或注册表读取失败，忽略
+    final proxy = readWindowsSystemProxy();
+    if (proxy == null) return;
+    final adapter = dio.httpClientAdapter;
+    if (adapter is IOHttpClientAdapter) {
+      adapter.createHttpClient = () {
+        final client = HttpClient();
+        client.findProxy = (uri) => 'PROXY $proxy';
+        client.badCertificateCallback = (_, _, _) => true;
+        return client;
+      };
     }
   }
 

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'platform.dart';
+
 /// 设计语言：Edge Telemetry
 /// 单一强调色 = Cloudflare 橙 (#ff7a1a)，其余皆为中性灰阶，杜绝"背景与字体同色"。
 class AppTheme {
   static const edgeOrange = Color(0xFFFF7A1A);
-  static const edgeOrangeDark = Color(0xFFE0640A);
 
   static const _lightBg = Color(0xFFFBFAF8);
   static const _lightSurface = Color(0xFFFFFFFF);
@@ -12,7 +13,6 @@ class AppTheme {
   static const _lightText = Color(0xFF1C1917);
   static const _lightTextDim = Color(0xFF78716C);
   static const _lightBorder = Color(0xFFE7E3DC);
-  static const _lightLogBg = Color(0xFFFCFBF9);
   static const _lightLogFg = Color(0xFF1C1917);
   // 语义色（与强调色和谐）。light 下取略深的可读版本。
   static const _lightSuccess = Color(0xFF16A34A);
@@ -25,7 +25,6 @@ class AppTheme {
   static const _darkText = Color(0xFFF5F0EA);
   static const _darkTextDim = Color(0xFF9A9189);
   static const _darkBorder = Color(0xFF2A241E);
-  static const _darkLogBg = Color(0xFF0C0A09);
   static const _darkLogFg = Color(0xFFCBD5E1);
   // 语义色 dark 下取略亮的可读版本。
   static const _darkSuccess = Color(0xFF4ADE80);
@@ -50,7 +49,6 @@ class AppTheme {
         text: _lightText,
         textDim: _lightTextDim,
         border: _lightBorder,
-        logBg: _lightLogBg,
         logFg: _lightLogFg,
         success: _lightSuccess,
         danger: _lightDanger,
@@ -65,7 +63,6 @@ class AppTheme {
         text: _darkText,
         textDim: _darkTextDim,
         border: _darkBorder,
-        logBg: _darkLogBg,
         logFg: _darkLogFg,
         success: _darkSuccess,
         danger: _darkDanger,
@@ -80,7 +77,6 @@ class AppTheme {
     required Color text,
     required Color textDim,
     required Color border,
-    required Color logBg,
     required Color logFg,
     required Color success,
     required Color danger,
@@ -99,7 +95,8 @@ class AppTheme {
       onSurface: text,
     );
 
-    final radius = BorderRadius.circular(10);
+    // M3 标准圆角：12px（对应 shape.medium）
+    final radius = BorderRadius.circular(12);
 
     return ThemeData(
       useMaterial3: true,
@@ -107,6 +104,29 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: bg,
       fontFamily: 'AppSans',
+      // M3 Typography Scale：统一文字样式，消除散落的 inline TextStyle
+      textTheme: TextTheme(
+        bodyLarge: TextStyle(fontSize: 15, color: text),
+        bodyMedium: TextStyle(fontSize: 14, color: text),
+        bodySmall: TextStyle(fontSize: 13, color: textDim),
+        titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: text),
+        titleMedium: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: text),
+        titleSmall: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: text),
+        labelLarge: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: text),
+        labelMedium: TextStyle(fontSize: 13, color: textDim),
+        labelSmall: TextStyle(fontSize: 12, color: textDim),
+      ),
+      // 全局输入框样式：统一样式，消除 inputDecorationFor 的重复构造
+      inputDecorationTheme: InputDecorationTheme(
+        isDense: true,
+        filled: true,
+        fillColor: bg,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: border)),
+        enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: border)),
+        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: edgeOrange, width: 1.5)),
+        hintStyle: TextStyle(color: textDim, fontSize: 12),
+      ),
       cardTheme: CardThemeData(
         color: surface,
         elevation: 0,
@@ -125,7 +145,9 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: edgeOrange,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          padding: EdgeInsets.symmetric(horizontal: 18, vertical: kIsMobile ? 14 : 12),
+          minimumSize: Size(64, kIsMobile ? 48 : 36),
+          tapTargetSize: MaterialTapTargetSize.padded,
           shape: RoundedRectangleBorder(borderRadius: radius),
           textStyle: const TextStyle(fontWeight: FontWeight.bold),
         ),
@@ -134,16 +156,49 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: text,
           side: BorderSide(color: border),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: kIsMobile ? 14 : 12),
+          minimumSize: Size(64, kIsMobile ? 48 : 36),
+          tapTargetSize: MaterialTapTargetSize.padded,
           shape: RoundedRectangleBorder(borderRadius: radius),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(foregroundColor: textDim),
+        style: TextButton.styleFrom(
+          foregroundColor: textDim,
+          minimumSize: Size(0, kIsMobile ? 48 : 36),
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
       ),
       dividerTheme: DividerThemeData(color: border, thickness: 1),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: edgeOrange,
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: bg,
+        side: BorderSide(color: border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        labelStyle: TextStyle(fontSize: 12, color: text),
+      ),
+      // Tooltip 触发时机：移动端用 tap（hover 不存在），桌面用 manual
+      tooltipTheme: TooltipThemeData(
+        triggerMode: kIsMobile ? TooltipTriggerMode.tap : TooltipTriggerMode.manual,
+        showDuration: const Duration(seconds: 3),
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: edgeOrange,
+        thumbColor: edgeOrange,
+        overlayColor: edgeOrange.withValues(alpha: 0.12),
+        inactiveTrackColor: border,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return edgeOrange;
+          return null;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return edgeOrange.withValues(alpha: 0.5);
+          return null;
+        }),
       ),
       extensions: [
         AppThemeExt(
@@ -153,7 +208,6 @@ class AppTheme {
           text: text,
           textDim: textDim,
           border: border,
-          logBg: logBg,
           logFg: logFg,
           success: success,
           danger: danger,
@@ -174,7 +228,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
   final Color text;
   final Color textDim;
   final Color border;
-  final Color logBg;
   final Color logFg;
   // 语义色：状态药丸 / 延迟分级 / 着色日志用。
   final Color success;
@@ -191,7 +244,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     required this.text,
     required this.textDim,
     required this.border,
-    required this.logBg,
     required this.logFg,
     required this.success,
     required this.danger,
@@ -224,7 +276,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     Color? text,
     Color? textDim,
     Color? border,
-    Color? logBg,
     Color? logFg,
     Color? success,
     Color? danger,
@@ -239,7 +290,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
         text: text ?? this.text,
         textDim: textDim ?? this.textDim,
         border: border ?? this.border,
-        logBg: logBg ?? this.logBg,
         logFg: logFg ?? this.logFg,
         success: success ?? this.success,
         danger: danger ?? this.danger,
@@ -270,7 +320,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
       text: Color.lerp(text, other.text, t)!,
       textDim: Color.lerp(textDim, other.textDim, t)!,
       border: Color.lerp(border, other.border, t)!,
-      logBg: Color.lerp(logBg, other.logBg, t)!,
       logFg: Color.lerp(logFg, other.logFg, t)!,
       success: Color.lerp(success, other.success, t)!,
       danger: Color.lerp(danger, other.danger, t)!,

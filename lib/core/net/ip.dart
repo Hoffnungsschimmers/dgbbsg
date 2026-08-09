@@ -182,8 +182,9 @@ const _cfAirportMap = <String, String>{
 /// 通过 Cloudflare cdn-cgi/trace 诊断端点识别 IP 所在地区。
 /// 发送 HTTP(S) GET 请求 /cdn-cgi/trace，解析 colo=XXX 字段得到机场码。
 /// 国内直连 CF IP 时常 80 端口被封，因此先尝试 HTTP，失败后自动降级 HTTPS。
-/// 尝试通过 cdn-cgi/trace 获取 IP 的 Cloudflare 数据中心位置。
 /// 对任意 IP 都尝试（不限于已知 CF 段），非 CF IP 会连接失败返回空串。
+/// 注意：每次调用创建独立 HttpClient，因为调用场景是批量短生命周期请求
+/// （Future.wait 并发数十到数百个），无需连接池复用。
 Future<String> geolocateCfIp(String ip, {Duration? timeout, String? proxy}) async {
   final t = timeout ?? const Duration(milliseconds: 2500);
   // 先试 HTTP，再试 HTTPS（国内 CF IP 的 80 端口常被封）

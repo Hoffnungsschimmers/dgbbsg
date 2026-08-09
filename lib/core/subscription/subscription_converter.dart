@@ -215,11 +215,11 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
 
 /// 转换所有候选订阅器/订阅链接为标准 IP:port#CC 节点列表（去重）。
 ///
-/// 返回 (节点列表, 节点->来源映射)。[fetch] 注入真实 HTTP 拉取；
+/// 返回去重后的节点列表。[fetch] 注入真实 HTTP 拉取；
 /// [resolve] 注入域名解析（返回 IP 或 null）。[parser] 用于从节点名提取国家码。
 /// [geolocateIps] 可选注入 IP 批量地理查询（测试时可 mock 为空）。
 /// [geolocateIpsFallback] 可选注入备用 IP 地理查询（测试时可 mock 为空）。
-Future<(List<String>, Map<String, String>)> convertSubscriptions(
+Future<List<String>> convertSubscriptions(
   AppConfig config, {
   required SubFetcher fetch,
   required Future<String?> Function(String host) resolve,
@@ -230,7 +230,7 @@ Future<(List<String>, Map<String, String>)> convertSubscriptions(
   void Function(String)? onLog,
 }) async {
   final tasks = collectSubscriptionTasks(config);
-  if (tasks.isEmpty) return (<String>[], <String, String>{});
+  if (tasks.isEmpty) return <String>[];
 
   final rawNodes = <({String host, int port, String name, String source})>[];
   final state = <String, Map<String, dynamic>>{};
@@ -273,7 +273,7 @@ Future<(List<String>, Map<String, String>)> convertSubscriptions(
       state[name] = {'ok': got > 0, 'nodes': got, 'ts': now};
     }
 
-  if (rawNodes.isEmpty) return (<String>[], <String, String>{});
+  if (rawNodes.isEmpty) return <String>[];
 
   final defaultCc = config.subDefaultCountry.toUpperCase();
   final hosts = <String>{for (final r in rawNodes) r.host};
@@ -379,7 +379,7 @@ Future<(List<String>, Map<String, String>)> convertSubscriptions(
 
   onLog?.call(
       '订阅转换完成：共 ${rawNodes.length} 个节点 → 去重后 ${nodes.length} 个。');
-  return (nodes, <String, String>{});
+  return nodes;
 }
 
 /// 将订阅转换结果写入独立文件（LF 换行，便于 git 处理）。
@@ -403,38 +403,3 @@ Future<void> writeSubOutput(List<String> nodes, String outputFile) async {
   }));
 }
 
-String sourceMapPath(String outputFile) {
-  final p = outputFile.replaceAll('\\', '/');
-  final idx = p.lastIndexOf('/');
-  final dir = idx >= 0 ? p.substring(0, idx + 1) : '';
-  final stem = idx >= 0 ? p.substring(idx + 1) : p;
-  final dot = stem.lastIndexOf('.');
-  final base = dot > 0 ? stem.substring(0, dot) : stem;
-  return '$dir${base}_src.json';
-}
-
-/// 将 节点->来源 映射写入独立 JSON 文件。
-Future<void> writeSourceMap(Map<String, String> sourceMap, String outputFile) async {
-  final path = sourceMapPath(outputFile);
-  final f = File(path);
-  await f.create(recursive: true);
-  await f.writeAsString(jsonEncode(sourceMap), encoding: utf8, flush: true);
-}
-
-/// 读取 节点->来源 映射；文件不存在或损坏时返回空字典。
-Future<Map<String, String>> loadSourceMap(String outputFile, {void Function(String)? onLog}) async {
-  final path = sourceMapPath(outputFile);
-  final f = File(path);
-  if (!f.existsSync()) return {};
-  try {
-    final data = jsonDecode(await f.readAsString(encoding: utf8));
-    if (data is Map) {
-      return data.map((k, v) => MapEntry(k.toString(), v.toString()));
-    }
-  } on FormatException catch (e) {
-    onLog?.call('来源映射文件 JSON 解析失败 [$path]：$e');
-  } on FileSystemException catch (e) {
-    onLog?.call('来源映射文件读取失败 [$path]：$e');
-  }
-  return {};
-}
