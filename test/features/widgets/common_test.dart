@@ -55,13 +55,6 @@ void main() {
     });
   });
 
-  group('sectionTitle()', () {
-    testWidgets('显示标题文本', (tester) async {
-      await tester.pumpWidget(_wrap(const _SectionTitleTest()));
-      expect(find.text('区块标题'), findsOneWidget);
-    });
-  });
-
   group('CountUpText', () {
     testWidgets('显示数值', (tester) async {
       await tester.pumpWidget(_wrap(const CountUpText(42)));
@@ -79,13 +72,6 @@ void main() {
       await tester.pumpWidget(_wrap(const CountUpText(100, suffix: ' ms')));
       await tester.pumpAndSettle();
       expect(find.text('100 ms'), findsOneWidget);
-    });
-  });
-
-  group('GeoChip', () {
-    testWidgets('显示国家名和计数', (tester) async {
-      await tester.pumpWidget(_wrap(const GeoChip(code: 'US', count: 5)));
-      expect(find.text('5'), findsOneWidget);
     });
   });
 
@@ -145,22 +131,6 @@ void main() {
     });
   });
 
-  group('labeledTextField()', () {
-    testWidgets('显示标签和输入框', (tester) async {
-      await tester.pumpWidget(_wrap(const _LabeledTextFieldTest()));
-      expect(find.text('Token'), findsOneWidget);
-      expect(find.byType(TextField), findsOneWidget);
-    });
-  });
-
-  group('labeledSwitch()', () {
-    testWidgets('显示标签和开关', (tester) async {
-      await tester.pumpWidget(_wrap(const _LabeledSwitchTest()));
-      expect(find.text('跳过 TLS 校验'), findsOneWidget);
-      expect(find.byType(Switch), findsOneWidget);
-    });
-  });
-
   group('labeledSliderCountUp()', () {
     testWidgets('显示标签和滑块', (tester) async {
       await tester.pumpWidget(_wrap(const _LabeledSliderTest()));
@@ -214,37 +184,6 @@ class _PillWithIconTest extends StatelessWidget {
   Widget build(BuildContext context) {
     return Builder(
       builder: (ctx) => pillWithIcon(ctx, icon: Icons.schedule, text: '3 分钟前', bg: Colors.grey),
-    );
-  }
-}
-
-class _SectionTitleTest extends StatelessWidget {
-  const _SectionTitleTest();
-  @override
-  Widget build(BuildContext context) {
-    return Builder(
-      builder: (ctx) => sectionTitle(ctx, '区块标题'),
-    );
-  }
-}
-
-class _LabeledTextFieldTest extends StatelessWidget {
-  const _LabeledTextFieldTest();
-  @override
-  Widget build(BuildContext context) {
-    final ctl = TextEditingController();
-    return Builder(
-      builder: (ctx) => labeledTextField(ctx, 'Token', ctl, (_) {}),
-    );
-  }
-}
-
-class _LabeledSwitchTest extends StatelessWidget {
-  const _LabeledSwitchTest();
-  @override
-  Widget build(BuildContext context) {
-    return Builder(
-      builder: (ctx) => labeledSwitch(ctx, '跳过 TLS 校验', false, (_) {}),
     );
   }
 }

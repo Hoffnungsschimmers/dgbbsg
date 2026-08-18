@@ -45,12 +45,3 @@ class AppButton extends StatelessWidget {
         : OutlinedButton(onPressed: onPressed, child: child);
   }
 }
-
-/// 区块标题。
-Widget sectionTitle(BuildContext context, String text) {
-  final t = AppThemeExt.of(context);
-  return Text(
-    text,
-    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textDim),
-  );
-}
