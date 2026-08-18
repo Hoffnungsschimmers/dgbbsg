@@ -3,17 +3,26 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_config.dart';
+import 'secure_kv.dart';
 
 /// 配置持久化仓库。内存持有当前 [AppConfig]（单例语义）。
 /// 启动时从 shared_preferences 读取；不存在则用默认值。旧键忽略，向后兼容。
+/// GitHub Token / Webhook URL 属敏感密钥，单独经 [SecureKV] 安全存储，
+/// 不写入 SharedPreferences 明文 JSON（旧版本明文值在启动时一次性迁移）。
 class ConfigRepository {
   AppConfig _config;
   final SharedPreferences _prefs;
+  final SecureKV _secure;
 
-  ConfigRepository._(this._config, this._prefs);
+  ConfigRepository._(this._config, this._prefs, this._secure);
 
-  static Future<ConfigRepository> init() async {
+  static const _kConfigJson = 'app_config_json';
+  static const _kGithubToken = 'github_token';
+  static const _kWebhookUrl = 'webhook_url';
+
+  static Future<ConfigRepository> init({SecureKV? secure}) async {
     final prefs = await SharedPreferences.getInstance();
+    final secureKv = secure ?? const SecureStorageKv();
     final jsonStr = prefs.getString(_kConfigJson);
     final Map<String, dynamic> data = jsonStr != null
         ? (jsonDecode(jsonStr) as Map<String, dynamic>)
@@ -42,14 +51,31 @@ class ConfigRepository {
       dirty = true;
     }
 
+    // 密钥迁移：优先读取安全存储；旧版本明文 JSON 中的密钥值一次性搬入
+    // 安全存储（随后重写 JSON 时 toJson 已不含密钥，明文自动清除）。
+    final secureToken = await secureKv.read(_kGithubToken);
+    final secureWebhook = await secureKv.read(_kWebhookUrl);
+    if (secureToken != null || secureWebhook != null) {
+      config = config.copyWith(
+        githubToken: secureToken ?? config.githubToken,
+        webhookUrl: secureWebhook ?? config.webhookUrl,
+      );
+    }
+    if (secureToken == null && config.githubToken.isNotEmpty) {
+      await secureKv.write(_kGithubToken, config.githubToken);
+      dirty = true;
+    }
+    if (secureWebhook == null && config.webhookUrl.isNotEmpty) {
+      await secureKv.write(_kWebhookUrl, config.webhookUrl);
+      dirty = true;
+    }
+
     if (dirty) {
       await prefs.setString(_kConfigJson, jsonEncode(config.toJson()));
     }
 
-    return ConfigRepository._(config, prefs);
+    return ConfigRepository._(config, prefs, secureKv);
   }
-
-  static const _kConfigJson = 'app_config_json';
 
   AppConfig get current => _config;
 
@@ -59,12 +85,21 @@ class ConfigRepository {
     _config = config;
   }
 
-  /// 持久化到 SharedPreferences 并更新内存。
+  /// 持久化：密钥写安全存储，其余写 SharedPreferences 并更新内存。
   Future<void> save(AppConfig config) async {
     _config = config;
+    if (config.githubToken.isNotEmpty) {
+      await _secure.write(_kGithubToken, config.githubToken);
+    } else {
+      await _secure.delete(_kGithubToken);
+    }
+    if (config.webhookUrl.isNotEmpty) {
+      await _secure.write(_kWebhookUrl, config.webhookUrl);
+    } else {
+      await _secure.delete(_kWebhookUrl);
+    }
     await _prefs.setString(_kConfigJson, jsonEncode(config.toJson()));
   }
-
 
   List<String> validateCurrent() => _config.validate();
 }
