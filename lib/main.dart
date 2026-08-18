@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,20 +17,26 @@ import 'features/widgets/common.dart';
 /// Global instance so the app shell can access it.
 final SystemTrayManager systemTrayManager = SystemTrayManager();
 
+/// 桌面平台（window_manager / system_tray 仅支持桌面端）。
+bool get isDesktopPlatform =>
+    Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize window_manager for desktop platforms.
-  await windowManager.ensureInitialized();
+  if (isDesktopPlatform) {
+    await windowManager.ensureInitialized();
 
-  const windowOptions = WindowOptions(
-    minimumSize: Size(800, 600),
-    title: 'CFNB - CF优选工具',
-  );
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
-    await windowManager.show();
-    await windowManager.focus();
-  });
+    const windowOptions = WindowOptions(
+      minimumSize: Size(800, 600),
+      title: 'CFNB - CF优选工具',
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
 
   runApp(const ProviderScope(child: MyApp()));
 }
@@ -50,18 +57,22 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     // 初始状态栏样式
     _applySystemUI(ThemeMode.light);
 
-    // Prevent the window from actually closing; hide to tray instead.
-    windowManager.setPreventClose(true);
-    windowManager.addListener(this);
+    if (isDesktopPlatform) {
+      // Prevent the window from actually closing; hide to tray instead.
+      windowManager.setPreventClose(true);
+      windowManager.addListener(this);
 
-    // Initialize the system tray after the first frame so context is ready.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initSystemTray());
+      // Initialize the system tray after the first frame so context is ready.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _initSystemTray());
+    }
   }
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
-    systemTrayManager.dispose();
+    if (isDesktopPlatform) {
+      windowManager.removeListener(this);
+      systemTrayManager.dispose();
+    }
     super.dispose();
   }
 

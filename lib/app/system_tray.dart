@@ -1,11 +1,22 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 
 class SystemTrayManager {
   final SystemTray _tray = SystemTray();
+
+  /// 将打包进资源的 logo 解包到临时目录（system_tray 需要真实文件路径，
+  /// 打包后的发行版中不存在 assets/ 文件系统路径）。
+  Future<String> _extractIconToTemp() async {
+    final data = await rootBundle.load('assets/icon/logo.png');
+    final dir = await Directory.systemTemp.createTemp('cfnb_tray');
+    final f = File('${dir.path}/logo.png');
+    await f.writeAsBytes(data.buffer.asUint8List());
+    return f.path;
+  }
 
   Future<void> init({
     VoidCallback? onShow,
@@ -13,18 +24,7 @@ class SystemTrayManager {
     VoidCallback? onRunLatency,
     VoidCallback? onQuit,
   }) async {
-    // Determine the correct icon path for the platform.
-    // On Windows the .ico is preferred; fall back to the PNG.
-    String iconPath;
-    if (Platform.isWindows) {
-      iconPath = 'assets/icon/logo.ico';
-      // If the .ico file does not exist, use the PNG instead.
-      if (!File(iconPath).existsSync()) {
-        iconPath = 'assets/icon/logo.png';
-      }
-    } else {
-      iconPath = 'assets/icon/logo.png';
-    }
+    final iconPath = await _extractIconToTemp();
 
     // Initialize the tray icon.
     await _tray.initSystemTray(

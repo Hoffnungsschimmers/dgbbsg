@@ -487,14 +487,9 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
               ),
             ),
             const SizedBox(height: 4),
-            InkWell(
-              onTap: () {
-                // 用户可自行前往 GitHub 生成 token
-              },
-              child: Text(
-                '前往 GitHub Settings → Developer settings → Personal access tokens',
-                style: TextStyle(fontSize: 11, color: AppTheme.edgeOrange, decoration: TextDecoration.underline),
-              ),
+            Text(
+              '前往 GitHub Settings → Developer settings → Personal access tokens',
+              style: TextStyle(fontSize: 11, color: AppTheme.edgeOrange, decoration: TextDecoration.underline),
             ),
             const SizedBox(height: 20),
 
