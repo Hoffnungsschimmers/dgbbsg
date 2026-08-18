@@ -38,6 +38,12 @@ void main() {
       final urls = generatorFetchUrls('https://sub.x.com/abcdef', const AppConfig());
       expect(urls, ['https://sub.x.com/abcdef']);
     });
+    test('strips trailing slash before appending /sub', () {
+      final cfg = AppConfig(subNodeHost: 'h.com', subNodeUuid: 'uuid-1');
+      final urls = generatorFetchUrls('https://sub.example.com/', cfg);
+      expect(urls[0], startsWith('https://sub.example.com/sub?'));
+      expect(urls[0], isNot(contains('//sub?')));
+    });
   });
 
   group('collectSubscriptionTasks', () {

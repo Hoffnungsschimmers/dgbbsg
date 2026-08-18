@@ -97,7 +97,7 @@ List<String> generatorFetchUrls(String host, AppConfig config, {String? secret})
   } else if (h.startsWith('http://')) {
     h = h.substring('http://'.length);
   }
-  h = h.replaceAll(RegExp(r'/+\$'), '');
+  h = h.replaceAll(RegExp(r'/+$'), '');
   if (h.isEmpty) return [];
 
   final fakeHost = (config.subNodeHost.isNotEmpty ? config.subNodeHost : 'example.com').trim();
