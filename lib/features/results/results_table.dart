@@ -12,7 +12,7 @@ import 'result_state.dart';
 // 结果表格
 // ═══════════════════════════════════════════════════════
 
-class ResultTable extends StatelessWidget {
+class ResultTable extends StatefulWidget {
   const ResultTable({
     super.key,
     required this.rows,
@@ -33,117 +33,6 @@ class ResultTable extends StatelessWidget {
   final int sortCol;
   final bool sortAsc;
   final void Function(int col)? onSort;
-
-  @override
-  Widget build(BuildContext context) {
-    final colWidths = editMode
-        ? [FlexColumnWidth(3), FlexColumnWidth(4), IntrinsicColumnWidth()]
-        : [FlexColumnWidth(3), FlexColumnWidth(4)];
-
-    return card(
-      context,
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: [
-          _headerRow(context, colWidths),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
-            child: Scrollbar(
-              thumbVisibility: true,
-              child: editMode && onReorder != null
-                  ? ReorderableListView.builder(
-                      itemCount: rows.length,
-                      onReorder: onReorder!,
-                      buildDefaultDragHandles: false,
-                      itemBuilder: (context, i) {
-                        final row = rows[i];
-                        return _dataRow(context, i, row, colWidths, showDragHandle: true);
-                      },
-                    )
-                  : ListView.builder(
-                      itemCount: rows.length,
-                      itemExtent: kIsMobile ? 64 : 60,
-                      itemBuilder: (context, i) {
-                        final row = rows[i];
-                        return _dataRow(context, i, row, colWidths);
-                      },
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _headerRow(BuildContext context, List<TableColumnWidth> colWidths) {
-    final t = AppThemeExt.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: t.surfaceHover,
-        border: Border(bottom: BorderSide(color: t.border, width: 1)),
-      ),
-      child: Table(
-        columnWidths: {for (var i = 0; i < colWidths.length; i++) i: colWidths[i]},
-        children: [
-          TableRow(
-            children: [
-              _sortHeader(context, '节点', 0),
-              _sortHeader(context, '注释', 1),
-              if (editMode) _th(context, ''),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _dataRow(BuildContext context, int index, ResultRow row, List<TableColumnWidth> colWidths, {bool showDragHandle = false}) {
-    return _DataRowWidget(
-      key: ValueKey('${row.ipPort}_$index'),
-      index: index,
-      row: row,
-      colWidths: colWidths,
-      editMode: editMode,
-      showDragHandle: showDragHandle,
-      onEdit: onEdit != null ? () => onEdit!.call(index) : null,
-      onDelete: onDelete != null ? () => onDelete!.call(index) : null,
-    )
-        .animate(delay: Motion.staggerDelay(index))
-        .fadeIn(duration: Motion.staggerDur, curve: Motion.curveStandard)
-        .slideX(begin: 0.03, end: 0, duration: Motion.staggerDur, curve: Motion.curveStandard);
-  }
-
-  Widget _sortHeader(BuildContext context, String label, int col) {
-    final t = AppThemeExt.of(context);
-    final isActive = sortCol == col;
-    return InkWell(
-      onTap: () => onSort?.call(col),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isActive ? t.text : t.textDim)),
-            if (isActive) ...[
-              const SizedBox(width: 4),
-              AnimatedRotation(
-                turns: sortAsc ? 0 : 0.5,
-                duration: Motion.durFast,
-                child: Icon(Icons.arrow_drop_up, size: 18, color: AppTheme.edgeOrange),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _th(BuildContext context, String s) {
-    final t = AppThemeExt.of(context);
-    return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        child: Text(s, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: t.textDim)));
-  }
 
   static Widget _nodeCell(BuildContext context, String ipPort) {
     final t = AppThemeExt.of(context);
@@ -178,6 +67,135 @@ class ResultTable extends StatelessWidget {
         maxLines: 2,
       ),
     );
+  }
+
+  @override
+  State<ResultTable> createState() => _ResultTableState();
+}
+
+class _ResultTableState extends State<ResultTable> {
+  final _scrollCtl = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollCtl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = widget.rows;
+    final editMode = widget.editMode;
+    final onReorder = widget.onReorder;
+    final colWidths = editMode
+        ? [FlexColumnWidth(3), FlexColumnWidth(4), IntrinsicColumnWidth()]
+        : [FlexColumnWidth(3), FlexColumnWidth(4)];
+
+    return card(
+      context,
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          _headerRow(context, colWidths),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
+            child: Scrollbar(
+              thumbVisibility: true,
+              controller: _scrollCtl,
+              child: editMode && onReorder != null
+                  ? ReorderableListView.builder(
+                      itemCount: rows.length,
+                      onReorder: onReorder!,
+                      buildDefaultDragHandles: false,
+                      itemBuilder: (context, i) {
+                        final row = rows[i];
+                        return _dataRow(context, i, row, colWidths, showDragHandle: true);
+                      },
+                    )
+                  : ListView.builder(
+                      controller: _scrollCtl,
+                      itemCount: rows.length,
+                      itemExtent: kIsMobile ? 64 : 60,
+                      itemBuilder: (context, i) {
+                        final row = rows[i];
+                        return _dataRow(context, i, row, colWidths);
+                      },
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerRow(BuildContext context, List<TableColumnWidth> colWidths) {
+    final t = AppThemeExt.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: t.surfaceHover,
+        border: Border(bottom: BorderSide(color: t.border, width: 1)),
+      ),
+      child: Table(
+        columnWidths: {for (var i = 0; i < colWidths.length; i++) i: colWidths[i]},
+        children: [
+          TableRow(
+            children: [
+              _sortHeader(context, '节点', 0),
+              _sortHeader(context, '注释', 1),
+              if (widget.editMode) _th(context, ''),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dataRow(BuildContext context, int index, ResultRow row, List<TableColumnWidth> colWidths, {bool showDragHandle = false}) {
+    return _DataRowWidget(
+      key: ValueKey('${row.ipPort}_$index'),
+      index: index,
+      row: row,
+      colWidths: colWidths,
+      editMode: widget.editMode,
+      showDragHandle: showDragHandle,
+      onEdit: widget.onEdit != null ? () => widget.onEdit!.call(index) : null,
+      onDelete: widget.onDelete != null ? () => widget.onDelete!.call(index) : null,
+    )
+        .animate(delay: Motion.staggerDelay(index))
+        .fadeIn(duration: Motion.staggerDur, curve: Motion.curveStandard)
+        .slideX(begin: 0.03, end: 0, duration: Motion.staggerDur, curve: Motion.curveStandard);
+  }
+
+  Widget _sortHeader(BuildContext context, String label, int col) {
+    final t = AppThemeExt.of(context);
+    final isActive = widget.sortCol == col;
+    return InkWell(
+      onTap: () => widget.onSort?.call(col),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isActive ? t.text : t.textDim)),
+            if (isActive) ...[
+              const SizedBox(width: 4),
+              AnimatedRotation(
+                turns: widget.sortAsc ? 0 : 0.5,
+                duration: Motion.durFast,
+                child: Icon(Icons.arrow_drop_up, size: 18, color: AppTheme.edgeOrange),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _th(BuildContext context, String s) {
+    final t = AppThemeExt.of(context);
+    return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        child: Text(s, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: t.textDim)));
   }
 }
 
