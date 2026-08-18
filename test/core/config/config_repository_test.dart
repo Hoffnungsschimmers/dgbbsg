@@ -90,4 +90,28 @@ void main() {
     final repo = await ConfigRepository.init(secure: InMemorySecureKv());
     expect(repo.current.subLatencyTimeout, 3.0);
   });
+
+  test('migration writes schema version', () async {
+    SharedPreferences.setMockInitialValues({
+      kConfigJson: jsonEncode({'SUB_LATENCY_TIMEOUT': 2.0}),
+    });
+    await ConfigRepository.init(secure: InMemorySecureKv());
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('app_config_version'), 1);
+  });
+
+  test('versioned config preserves user values (0 = keep all)', () async {
+    SharedPreferences.setMockInitialValues({
+      'app_config_version': 1,
+      kConfigJson: jsonEncode({
+        'SUB_LATENCY_TOP_N': 0,
+        'SUB_LATENCY_MAX_MS': 0,
+        'SUB_LATENCY_TIMEOUT': 2.0,
+      }),
+    });
+    final repo = await ConfigRepository.init(secure: InMemorySecureKv());
+    expect(repo.current.subLatencyTopN, 0);
+    expect(repo.current.subLatencyMaxMs, 0);
+    expect(repo.current.subLatencyTimeout, 2.0);
+  });
 }

@@ -17,6 +17,8 @@ class ConfigRepository {
   ConfigRepository._(this._config, this._prefs, this._secure);
 
   static const _kConfigJson = 'app_config_json';
+  static const _kSchemaVersion = 'app_config_version';
+  static const _currentSchemaVersion = 1;
   static const _kGithubToken = 'github_token';
   static const _kWebhookUrl = 'webhook_url';
 
@@ -29,26 +31,31 @@ class ConfigRepository {
         : <String, dynamic>{};
     var config = data.isNotEmpty ? AppConfig.fromJson(data) : const AppConfig();
     var dirty = false;
+    final storedVersion = prefs.getInt(_kSchemaVersion) ?? 0;
 
-    // 迁移：旧默认国家 UN 视为未配置，改为空串（由节点名国家码决定）。
-    if (config.subDefaultCountry.toUpperCase() == 'UN') {
-      config = config.copyWith(subDefaultCountry: '');
-      dirty = true;
-    }
-
-    if (config.subLatencyTimeout == 2.0) {
-      config = config.copyWith(subLatencyTimeout: 3.0);
-      dirty = true;
-    }
-    if (config.subLatencyMaxMs == 0) {
-      config = config.copyWith(subLatencyMaxMs: 300);
-      dirty = true;
-    }
-
-    // 迁移：旧配置若 subLatencyTopN 为 0（旧默认=全部保留），改为推荐值 50。
-    if (config.subLatencyTopN == 0) {
-      config = config.copyWith(subLatencyTopN: 50);
-      dirty = true;
+    // 一次性历史迁移：仅在没有版本标记的旧配置上执行。
+    // 带版本标记后不再改写用户值（subLatencyTopN=0 表示全部保留等）。
+    if (storedVersion < _currentSchemaVersion) {
+      // 迁移：旧默认国家 UN 视为未配置，改为空串（由节点名国家码决定）。
+      if (config.subDefaultCountry.toUpperCase() == 'UN') {
+        config = config.copyWith(subDefaultCountry: '');
+        dirty = true;
+      }
+      // 旧默认 2.0s 超时过短，统一为 3.0s。
+      if (config.subLatencyTimeout == 2.0) {
+        config = config.copyWith(subLatencyTimeout: 3.0);
+        dirty = true;
+      }
+      // 旧默认 maxMs=0（旧版语义不同）统一为推荐值 300。
+      if (config.subLatencyMaxMs == 0) {
+        config = config.copyWith(subLatencyMaxMs: 300);
+        dirty = true;
+      }
+      // 迁移：旧配置若 subLatencyTopN 为 0（旧默认=全部保留），改为推荐值 50。
+      if (config.subLatencyTopN == 0) {
+        config = config.copyWith(subLatencyTopN: 50);
+        dirty = true;
+      }
     }
 
     // 密钥迁移：优先读取安全存储；旧版本明文 JSON 中的密钥值一次性搬入
@@ -72,6 +79,9 @@ class ConfigRepository {
 
     if (dirty) {
       await prefs.setString(_kConfigJson, jsonEncode(config.toJson()));
+    }
+    if (storedVersion < _currentSchemaVersion) {
+      await prefs.setInt(_kSchemaVersion, _currentSchemaVersion);
     }
 
     return ConfigRepository._(config, prefs, secureKv);
