@@ -46,16 +46,6 @@ class AppConfig {
   final bool webhookOnComplete;   // 任务完成时通知
   final bool webhookOnError;      // 任务失败时通知
 
-  // ============ 扫描器 ============
-  final int scannerPort;
-  final int scannerBackupPort;
-  final int scannerConcurrency;
-  final int scannerDelayThreshold;
-  final int scannerResultLimit;
-  final int scannerSpeedThreads;
-  final double scannerSpeedThreshold;
-  final int scannerSpeedResultLimit;
-
   // ============ 外观 ============
   final String guiTheme;
 
@@ -95,14 +85,6 @@ class AppConfig {
     this.webhookType = 'none',
     this.webhookOnComplete = true,
     this.webhookOnError = true,
-    this.scannerPort = 443,
-    this.scannerBackupPort = 80,
-    this.scannerConcurrency = 100,
-    this.scannerDelayThreshold = 300,
-    this.scannerResultLimit = 100,
-    this.scannerSpeedThreads = 5,
-    this.scannerSpeedThreshold = 1.0,
-    this.scannerSpeedResultLimit = 50,
     this.guiTheme = 'light',
     this.hasCompletedOnboarding = false,
   });
@@ -163,14 +145,6 @@ class AppConfig {
       webhookType: pick('WEBHOOK_TYPE', 'none'),
       webhookOnComplete: pick('WEBHOOK_ON_COMPLETE', true),
       webhookOnError: pick('WEBHOOK_ON_ERROR', true),
-      scannerPort: pick('SCANNER_PORT', 443),
-      scannerBackupPort: pick('SCANNER_BACKUP_PORT', 80),
-      scannerConcurrency: pick('SCANNER_CONCURRENCY', 100),
-      scannerDelayThreshold: pick('SCANNER_DELAY_THRESHOLD', 300),
-      scannerResultLimit: pick('SCANNER_RESULT_LIMIT', 100),
-      scannerSpeedThreads: pick('SCANNER_SPEED_THREADS', 5),
-      scannerSpeedThreshold: (pick('SCANNER_SPEED_THRESHOLD', 1.0) as num).toDouble(),
-      scannerSpeedResultLimit: pick('SCANNER_SPEED_RESULT_LIMIT', 50),
       guiTheme: pick('GUI_THEME', 'light'),
       hasCompletedOnboarding: pick('HAS_COMPLETED_ONBOARDING', false),
     );
@@ -207,14 +181,6 @@ class AppConfig {
         'WEBHOOK_TYPE': webhookType,
         'WEBHOOK_ON_COMPLETE': webhookOnComplete,
         'WEBHOOK_ON_ERROR': webhookOnError,
-        'SCANNER_PORT': scannerPort,
-        'SCANNER_BACKUP_PORT': scannerBackupPort,
-        'SCANNER_CONCURRENCY': scannerConcurrency,
-        'SCANNER_DELAY_THRESHOLD': scannerDelayThreshold,
-        'SCANNER_RESULT_LIMIT': scannerResultLimit,
-        'SCANNER_SPEED_THREADS': scannerSpeedThreads,
-        'SCANNER_SPEED_THRESHOLD': scannerSpeedThreshold,
-        'SCANNER_SPEED_RESULT_LIMIT': scannerSpeedResultLimit,
         'GUI_THEME': guiTheme,
         'HAS_COMPLETED_ONBOARDING': hasCompletedOnboarding,
       };
@@ -252,14 +218,6 @@ class AppConfig {
     String? webhookType,
     bool? webhookOnComplete,
     bool? webhookOnError,
-    int? scannerPort,
-    int? scannerBackupPort,
-    int? scannerConcurrency,
-    int? scannerDelayThreshold,
-    int? scannerResultLimit,
-    int? scannerSpeedThreads,
-    double? scannerSpeedThreshold,
-    int? scannerSpeedResultLimit,
     String? guiTheme,
     bool? hasCompletedOnboarding,
   }) {
@@ -296,14 +254,6 @@ class AppConfig {
       webhookType: webhookType ?? this.webhookType,
       webhookOnComplete: webhookOnComplete ?? this.webhookOnComplete,
       webhookOnError: webhookOnError ?? this.webhookOnError,
-      scannerPort: scannerPort ?? this.scannerPort,
-      scannerBackupPort: scannerBackupPort ?? this.scannerBackupPort,
-      scannerConcurrency: scannerConcurrency ?? this.scannerConcurrency,
-      scannerDelayThreshold: scannerDelayThreshold ?? this.scannerDelayThreshold,
-      scannerResultLimit: scannerResultLimit ?? this.scannerResultLimit,
-      scannerSpeedThreads: scannerSpeedThreads ?? this.scannerSpeedThreads,
-      scannerSpeedThreshold: scannerSpeedThreshold ?? this.scannerSpeedThreshold,
-      scannerSpeedResultLimit: scannerSpeedResultLimit ?? this.scannerSpeedResultLimit,
       guiTheme: guiTheme ?? this.guiTheme,
       hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );
