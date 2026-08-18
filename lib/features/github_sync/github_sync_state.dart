@@ -72,18 +72,24 @@ class GithubSyncState {
 class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
   final Ref ref;
 
-  GithubSyncNotifier(this.ref) : super(const GithubSyncState());
+  /// 可注入的 GithubPush 工厂（测试用），null 时按配置构造。
+  final GithubPush Function(AppConfig config)? githubFactory;
+
+  GithubSyncNotifier(this.ref, {this.githubFactory})
+      : super(const GithubSyncState());
 
   Future<AppConfig> _cfg() async =>
       await ref.read(configRepositoryProvider.future).then((r) => r.current);
 
-  GithubPush? _github(AppConfig cfg) => cfg.githubToken.isEmpty
-      ? null
-      : GithubPush(
-          token: cfg.githubToken,
-          repo: cfg.githubRepo,
-          branch: cfg.githubBranch,
-        );
+  GithubPush? _github(AppConfig cfg) {
+    if (githubFactory != null) return githubFactory!(cfg);
+    if (cfg.githubToken.isEmpty) return null;
+    return GithubPush(
+      token: cfg.githubToken,
+      repo: cfg.githubRepo,
+      branch: cfg.githubBranch,
+    );
+  }
 
   /// 从 GitHub 拉取远程结果文件并解析为节点列表。
   Future<void> pullFromGithub() async {
@@ -236,8 +242,15 @@ class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
       final code = await github.pushFile(file, content,
           message: 'sync $fileName (${state.remoteNodes.length} nodes)');
 
-      // 推送后重新拉取获取新 sha
-      final (_, newSha) = await github.pullFile(file);
+      // 推送后重新拉取获取新 sha。刷新失败不影响推送结果：
+      // 不误报"推送失败"，仅记警告日志，sha 下次拉取时自动更新。
+      var newSha = state.remoteSha;
+      try {
+        final (_, sha) = await github.pullFile(file);
+        newSha = sha;
+      } catch (e) {
+        ref.read(subLoggerProvider).warning('推送成功但刷新远程 SHA 失败：$e');
+      }
 
       state = state.copyWith(
         pushing: false,
