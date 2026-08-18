@@ -53,7 +53,7 @@ void main() {
   group('latencyProbeAll', () {
     test('orders succeeded before failed, ascending latency', () async {
       // 注入假探测：按 ip 末位决定延迟，特定 ip 超时
-      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1}) async {
+      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1, bool Function()? isCancelled}) async {
         if (ip.endsWith('.9')) return (null, null, 0); // 超时
         final last = int.parse(ip.split('.').last);
         return (last.toDouble(), 0.0, 1);
@@ -78,10 +78,10 @@ void main() {
     test('respects worker semaphore (no overflow)', () async {
       var concurrent = 0;
       var maxConcurrent = 0;
-      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1}) async {
+      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1, bool Function()? isCancelled}) async {
         concurrent++;
         maxConcurrent = maxConcurrent < concurrent ? concurrent : maxConcurrent;
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future<void>.delayed(const Duration(milliseconds: 10));
         concurrent--;
         return (1.0, 0.0, 1);
       }
@@ -93,7 +93,7 @@ void main() {
 
   group('LatencyFilter.run', () {
     test('writes output and json with latency cutoff', () async {
-      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1}) async {
+      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1, bool Function()? isCancelled}) async {
         if (ip.endsWith('.9')) return (null, null, 0);
         return (int.parse(ip.split('.').last).toDouble(), 0.0, 1);
       }
@@ -124,7 +124,7 @@ void main() {
     });
 
     test('keeps top N by quality, ranks them', () async {
-      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1}) async {
+      Future<(double?, double?, int)> fake(String ip, int port, Duration _, {int probes = 1, bool Function()? isCancelled}) async {
         return (10.0, 0.0, 1);
       }
       final dir = await Directory.systemTemp.createTemp('cfnb_lat_');

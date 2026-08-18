@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/**]
+  pull_request:
+    branches: [main]
+
+# 同一分支的后续 push 取消之前的运行
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: 静态分析
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 检查代码生成文件是否最新
+        run: |
+          dart run build_runner build --delete-conflicting-outputs
+          git diff --exit-code || (echo "⚠️ 代码生成文件过时，请本地运行 build_runner 后提交" && exit 1)
+
+      - name: 静态分析
+        run: flutter analyze --no-fatal-infos
+
+  test:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 运行测试
+        run: flutter test --coverage
+
+      - name: 上传覆盖率报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          retention-days: 7
+
+  build-windows:
+    name: Windows 构建
+    runs-on: windows-latest
+    needs: [analyze, test]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 构建 Windows Release
+        run: flutter build windows --release
+
+      - name: 打包便携版
+        shell: pwsh
+        run: |
+          $distDir = "dist"
+          if (Test-Path $distDir) { Remove-Item -Recurse -Force $distDir }
+          New-Item -ItemType Directory -Path $distDir | Out-Null
+          $buildDir = "build\windows\x64\runner\Release"
+          Copy-Item "$buildDir\*" -Destination $distDir -Recurse
+          Compress-Archive -Path "$distDir\*" -DestinationPath "CFNB-windows-portable.zip"
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: CFNB-windows-portable.zip
+          retention-days: 30
+
+  build-android:
+    name: Android 构建
+    runs-on: ubuntu-latest
+    needs: [analyze, test]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 构建 Android APK
+        run: flutter build apk --release
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30

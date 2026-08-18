@@ -1,14 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/github_sync/github_sync_tab.dart';
 import '../features/results/results_tab.dart';
 import '../features/results/result_state.dart';
 import '../features/subscriptions/config_tab.dart';
 import '../features/subscriptions/run_tab.dart';
 import '../features/subscriptions/subscriptions_state.dart';
+import '../main.dart' show systemTrayManager;
 import 'breakpoints.dart';
 import 'motion.dart';
-import 'platform.dart';
 import 'providers.dart';
 import 'shortcuts.dart';
 import 'theme.dart';
@@ -27,8 +30,8 @@ class AppShell extends ConsumerWidget {
 
     // Action handlers（供快捷键触发）
     void switchTab(int i) => ref.read(tabProvider.notifier).state = i;
-    void nextTab() => switchTab((ref.read(tabProvider) + 1) % 3);
-    void prevTab() => switchTab((ref.read(tabProvider) - 1 + 3) % 3);
+    void nextTab() => switchTab((ref.read(tabProvider) + 1) % 4);
+    void prevTab() => switchTab((ref.read(tabProvider) - 1 + 4) % 4);
     void refreshResults() {
       final cfg = ref.read(configProvider).value;
       if (cfg != null) {
@@ -56,6 +59,13 @@ class AppShell extends ConsumerWidget {
         ],
       ),
       actions: [
+        // Minimize to system tray (Windows / Linux only).
+        if (Platform.isWindows || Platform.isLinux)
+          IconButton(
+            icon: const Icon(Icons.minimize),
+            tooltip: '最小化到托盘',
+            onPressed: () => systemTrayManager.hideToTray(),
+          ),
         IconButton(
           icon: Icon(
             Theme.of(context).brightness == Brightness.dark
@@ -93,6 +103,7 @@ class AppShell extends ConsumerWidget {
           NavigationRailDestination(icon: Icon(Icons.tune), label: Text('配置')),
           NavigationRailDestination(icon: Icon(Icons.play_arrow), label: Text('运行')),
           NavigationRailDestination(icon: Icon(Icons.bar_chart), label: Text('结果')),
+          NavigationRailDestination(icon: Icon(Icons.sync), label: Text('同步')),
         ],
       );
       body = Expanded(child: _TabStack(tab: tab));
@@ -107,6 +118,7 @@ class AppShell extends ConsumerWidget {
             NavigationDestination(icon: Icon(Icons.tune), label: '配置'),
             NavigationDestination(icon: Icon(Icons.play_arrow), label: '运行'),
             NavigationDestination(icon: Icon(Icons.bar_chart), label: '结果'),
+            NavigationDestination(icon: Icon(Icons.sync), label: '同步'),
           ],
         ),
       );
@@ -132,7 +144,7 @@ class AppShell extends ConsumerWidget {
           return null;
         }),
         ToggleEditModeIntent: CallbackAction<ToggleEditModeIntent>(onInvoke: (_) {
-          // 由 ResultsTab 监听 tabProvider 变化来切换（不直接访问 state）
+          ref.read(editModeProvider.notifier).state = !ref.read(editModeProvider);
           return null;
         }),
         RunSubscriptionIntent: CallbackAction<RunSubscriptionIntent>(onInvoke: (_) {
@@ -165,8 +177,9 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-/// IndexedStack + 淡入叠加层过渡。
-/// 永久持有三页（不销毁），切 Tab 时叠一层共享 Z 轴过渡（fade + scale）。
+/// Animated tab stack: holds four tabs (Config, Run, Results, Sync) with
+/// slide + fade transitions on tab switch. All children stay alive via
+/// [AutomaticKeepAliveClientMixin].
 class _TabStack extends StatefulWidget {
   final int tab;
   const _TabStack({required this.tab});
@@ -176,30 +189,55 @@ class _TabStack extends StatefulWidget {
 }
 
 class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixin {
-  late AnimationController _fadeCtrl;
-  late Animation<double> _fadeAnim;
-  late Animation<double> _scaleAnim;
+  late AnimationController _ctrl;
+  late CurvedAnimation _curve;
+  late Animation<double> _oldFade; // 1.0 → 0.0 (fade out)
+  late Animation<double> _newFade; // 0.0 → 1.0 (fade in)
+  late Animation<Offset> _newSlide;
+  int _prevTab = 0;
+  bool _animating = false;
 
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(vsync: this, duration: Motion.durBase);
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Motion.curveStandard);
-    _scaleAnim = Tween(begin: 0.97, end: 1.0)
-        .animate(CurvedAnimation(parent: _fadeCtrl, curve: Motion.curveStandard));
+    _ctrl = AnimationController(duration: Motion.durBase, vsync: this)
+      ..addStatusListener(_onStatus);
+    _curve = CurvedAnimation(parent: _ctrl, curve: Motion.curveStandard);
+    _buildAnimations(0);
   }
 
   @override
   void dispose() {
-    _fadeCtrl.dispose();
+    _ctrl
+      ..removeStatusListener(_onStatus)
+      ..dispose();
+    _curve.dispose();
     super.dispose();
   }
 
+  void _onStatus(AnimationStatus s) {
+    if (s == AnimationStatus.completed) {
+      setState(() => _animating = false);
+    }
+  }
+
+  void _buildAnimations(int delta) {
+    _oldFade = Tween(begin: 1.0, end: 0.0).animate(_curve);
+    _newFade = Tween(begin: 0.0, end: 1.0).animate(_curve);
+    _newSlide = Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero)
+        .animate(_curve);
+  }
+
   @override
-  void didUpdateWidget(_TabStack old) {
+  void didUpdateWidget(covariant _TabStack old) {
     super.didUpdateWidget(old);
     if (old.tab != widget.tab) {
-      _fadeCtrl.forward(from: 0.0);
+      // If still animating a previous switch, snap it to end first.
+      if (_animating) _ctrl.value = 1.0;
+      _prevTab = old.tab;
+      _animating = true;
+      _buildAnimations(widget.tab - _prevTab);
+      _ctrl.forward(from: 0);
     }
   }
 
@@ -207,22 +245,27 @@ class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixi
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        IndexedStack(
-          index: widget.tab,
-          children: const [
-            ConfigTab(),
-            RunTab(),
-            ResultsTab(),
-          ],
-        ),
-        FadeTransition(
-          opacity: _fadeAnim,
-          child: ScaleTransition(
-            scale: _scaleAnim,
-            child: const SizedBox.expand(),
-          ),
-        ),
+        for (var i = 0; i < _children.length; i++)
+          if (i == widget.tab)
+            // New tab: fade in + slide in.
+            FadeTransition(
+              opacity: _newFade,
+              child: SlideTransition(position: _newSlide, child: _children[i]),
+            )
+          else if (i == _prevTab && _animating)
+            // Old tab: fade out (no slide, stays in place).
+            FadeTransition(opacity: _oldFade, child: _children[i])
+          else
+            // All other tabs: hidden but kept alive.
+            Offstage(offstage: true, child: _children[i]),
       ],
     );
   }
+
+  static const _children = [
+    ConfigTab(),
+    RunTab(),
+    ResultsTab(),
+    GithubSyncTab(),
+  ];
 }

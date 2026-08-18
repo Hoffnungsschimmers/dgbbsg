@@ -38,7 +38,10 @@ dependencies:
   dio: ^5.7.0
   crypto: ^3.0.5
   flutter_animate: ^4.5.0
-  fl_chart: ^0.69.0
+  system_tray: ^2.0.3
+  window_manager: ^0.3.7
+  local_notifier: ^0.1.5
+  file_picker: ^8.0.0
 
 dev_dependencies:
   flutter_test:

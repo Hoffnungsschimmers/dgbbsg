@@ -20,7 +20,7 @@ class LatencyFilter {
     double minSuccessRate = 1.0,
     int topN = 200,
     Map<String, String>? nodeSource,
-    Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes})? probe,
+    Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes, bool Function()? isCancelled})? probe,
     void Function(String)? onLog,
     bool Function()? isCancelled,
     void Function(int done, int total, int connected)? onProgress,
@@ -39,6 +39,29 @@ class LatencyFilter {
     );
 
     final connectedResults = ordered.where((r) => r.latencyMs != null).toList();
+
+    // 对 Cloudflare IP 做 cdn-cgi/trace 真实落地 POP 检测。
+    // 用当前网络的实际响应 POP 覆盖节点名里的国家码，
+    // 这样换设备/换网络重跑时会得到该网络下的真实落地。
+    final cfTraceMap = <String, String>{}; // ip -> 真实 POP 国家码
+    final cfIps = <String>{};
+    for (final r in connectedResults) {
+      final ep = parseEndpoint(r.node);
+      if (ep != null && isCloudflareIp(ep.$1)) {
+        cfIps.add(ep.$1);
+      }
+    }
+    if (cfIps.isNotEmpty) {
+      onLog?.call('正在通过 cdn-cgi/trace 检测 ${cfIps.length} 个 CF IP 的真实落地…');
+      final batchResult = await geolocateCfIpBatch(
+        cfIps.toList(),
+        timeout: const Duration(milliseconds: 3000),
+      );
+      cfTraceMap.addAll(batchResult);
+      if (cfTraceMap.isNotEmpty) {
+        onLog?.call('cdn-cgi/trace 完成：${cfTraceMap.length}/${cfIps.length} 个 CF IP 识别到落地。');
+      }
+    }
 
     // 仅保留延迟 ≤ latencyMaxMs 的节点（0/负表示不限）。
     final capped = latencyMaxMs > 0
@@ -62,11 +85,13 @@ class LatencyFilter {
     final out = File(outputFile);
     await out.create(recursive: true);
     final sb = StringBuffer();
-    // 纯数据输出：ip:port#国家名@来源 延迟
+    // 纯数据输出：ip:port#真实落地 延迟
     for (var i = 0; i < keptResults.length; i++) {
       final r = keptResults[i];
       final lat = (r.latencyMs != null) ? '${r.latencyMs!.toStringAsFixed(2)}ms' : '超时';
-      final displayNode = _displayNode(r.node);
+      // 用 cdn-cgi/trace 真实 POP 覆盖国家码
+      final updatedNode = _applyRealLanding(r.node, cfTraceMap);
+      final displayNode = _displayNode(updatedNode);
       sb.writeln('$displayNode $lat');
     }
     await out.writeAsString(sb.toString());
@@ -75,12 +100,14 @@ class LatencyFilter {
     final records = <Map<String, Object?>>[];
     for (var i = 0; i < keptResults.length; i++) {
       final r = keptResults[i];
-      final ep = parseEndpoint(r.node);
+      final updatedNode = _applyRealLanding(r.node, cfTraceMap);
+      final ep = parseEndpoint(updatedNode);
       records.add({
         'rank': i + 1,
         'ip': ep?.$1 ?? '',
         'port': ep?.$2 ?? 0,
-        'country': nodeCountry(r.node),
+        'country': nodeCountry(updatedNode),
+        'landing': cfTraceMap[ep?.$1] ?? '', // 真实落地国家码（仅 CF IP 有值）
         'source': nodeSource != null ? (nodeSource[r.node] ?? '') : '',
         'latency_ms': r.latencyMs == null ? null : (r.latencyMs! * 1000).round() / 1000,
         'jitter_ms': r.jitterMs == null ? null : (r.jitterMs! * 1000).round() / 1000,
@@ -107,6 +134,28 @@ class LatencyFilter {
     return (keptResults.map((r) => r.node).toList(), tested, connected);
   }
 
+  /// 用 cdn-cgi/trace 真实 POP 国家码替换节点名中的国家码。
+  /// 仅替换 Cloudflare IP（在 [cfTraceMap] 中有记录的 IP）。
+  /// 例：`172.64.145.93:443#CN source` + cfTraceMap[172.64.145.93]='SG'
+  ///   → `172.64.145.93:443#SG source`
+  static String _applyRealLanding(String node, Map<String, String> cfTraceMap) {
+    if (cfTraceMap.isEmpty) return node;
+    final ep = parseEndpoint(node);
+    if (ep == null) return node;
+    final realCc = cfTraceMap[ep.$1];
+    if (realCc == null || realCc.isEmpty) return node;
+    final hashIdx = node.indexOf('#');
+    if (hashIdx < 0) return '$node#$realCc';
+    final before = node.substring(0, hashIdx);
+    final after = node.substring(hashIdx + 1);
+    final sepIdx = findCcSourceSep(after);
+    if (sepIdx >= 0) {
+      final rest = after.substring(sepIdx); // 保留分隔符 + 来源
+      return '$before#$realCc$rest';
+    }
+    return '$before#$realCc';
+  }
+
   /// 将节点字符串中的国家码替换为中文名。
   /// 兼容新旧格式：
   ///   新: `1.2.3.4:443#HK CM` → `1.2.3.4:443#香港 CM`
@@ -116,16 +165,7 @@ class LatencyFilter {
     if (hashIdx < 0) return node;
     final before = node.substring(0, hashIdx);
     final after = node.substring(hashIdx + 1);
-    // 先找空格（新格式）或 @（旧格式）作为分隔
-    final spaceIdx = after.indexOf(' ');
-    final atIdx = after.indexOf('@');
-    // 取第一个出现的分隔符位置
-    int sepIdx = -1;
-    if (spaceIdx >= 0 && (atIdx < 0 || spaceIdx < atIdx)) {
-      sepIdx = spaceIdx;
-    } else if (atIdx >= 0) {
-      sepIdx = atIdx;
-    }
+    final sepIdx = findCcSourceSep(after);
     if (sepIdx >= 0) {
       final cc = after.substring(0, sepIdx);
       final rest = after.substring(sepIdx); // 保留分隔符

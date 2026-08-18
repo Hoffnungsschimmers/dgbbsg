@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:cfnb_app/core/net/http_fetcher.dart';
 import 'package:cfnb_app/core/net/retry.dart';
 import 'package:cfnb_app/core/subscription/subscription_converter.dart';
-import 'package:cfnb_app/features/subscriptions/subscriptions_state.dart';
 import 'package:dio/dio.dart' as dio_pkg;
 import 'package:flutter_test/flutter_test.dart';
 

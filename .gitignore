@@ -199,3 +199,9 @@ addressesapi_src.json
 addressesapi_top.txt.json
 _cleanup.mjs
 
+# 构建产物与运行时数据
+dist/
+all_optimized_ips.txt
+screenshot*.png
+app_*.png
+

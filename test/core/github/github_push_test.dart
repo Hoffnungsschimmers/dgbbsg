@@ -22,15 +22,15 @@ void main() {
 
   group('GithubPush.pushFile', () {
     test('creates new file when GET 404', () async {
-      Future<Response> fakeSender(RequestOptions o) async {
+      Future<Response<dynamic>> fakeSender(RequestOptions o) async {
         if (o.method == 'GET') {
-          throw DioException(requestOptions: o, response: Response(statusCode: 404, requestOptions: o));
+          throw DioException(requestOptions: o, response: Response<dynamic>(statusCode: 404, requestOptions: o));
         }
         // PUT
         expect(o.method, 'PUT');
-        final data = o.data as Map;
+        final data = o.data as Map<String, dynamic>;
         expect(data.containsKey('sha'), isFalse);
-        return Response(statusCode: 201, requestOptions: o, data: {});
+        return Response<dynamic>(statusCode: 201, requestOptions: o, data: <String, dynamic>{});
       }
       final gh = GithubPush(token: 't', repo: 'o/cf-ip', sender: fakeSender);
       final code = await gh.pushFile('ip.txt', 'hello');
@@ -38,13 +38,13 @@ void main() {
     });
 
     test('updates existing file when GET 200', () async {
-      Future<Response> fakeSender(RequestOptions o) async {
+      Future<Response<dynamic>> fakeSender(RequestOptions o) async {
         if (o.method == 'GET') {
-          return Response(statusCode: 200, requestOptions: o, data: {'sha': 'SHA1'});
+          return Response<dynamic>(statusCode: 200, requestOptions: o, data: <String, dynamic>{'sha': 'SHA1'});
         }
-        final data = o.data as Map;
+        final data = o.data as Map<String, dynamic>;
         expect(data['sha'], 'SHA1');
-        return Response(statusCode: 200, requestOptions: o, data: {});
+        return Response<dynamic>(statusCode: 200, requestOptions: o, data: <String, dynamic>{});
       }
       final gh = GithubPush(token: 't', repo: 'o/cf-ip', sender: fakeSender);
       final code = await gh.pushFile('ip.txt', 'hello');

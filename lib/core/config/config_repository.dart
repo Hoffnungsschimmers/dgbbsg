@@ -53,6 +53,13 @@ class ConfigRepository {
 
   AppConfig get current => _config;
 
+  /// 立即更新内存中的配置（不写磁盘）。
+  /// 用于 UI 输入时即时同步，防抖后再持久化。
+  void updateInMemory(AppConfig config) {
+    _config = config;
+  }
+
+  /// 持久化到 SharedPreferences 并更新内存。
   Future<void> save(AppConfig config) async {
     _config = config;
     await _prefs.setString(_kConfigJson, jsonEncode(config.toJson()));

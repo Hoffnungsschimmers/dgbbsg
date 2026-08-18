@@ -43,6 +43,7 @@ Map<ShortcutActivator, Intent> buildAppShortcuts() {
     const SingleActivator(LogicalKeyboardKey.digit1, control: true): const SwitchTabIntent(0),
     const SingleActivator(LogicalKeyboardKey.digit2, control: true): const SwitchTabIntent(1),
     const SingleActivator(LogicalKeyboardKey.digit3, control: true): const SwitchTabIntent(2),
+    const SingleActivator(LogicalKeyboardKey.digit4, control: true): const SwitchTabIntent(3),
     const SingleActivator(LogicalKeyboardKey.tab, control: true): const NextTabIntent(),
     const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): const PrevTabIntent(),
 
@@ -57,6 +58,5 @@ Map<ShortcutActivator, Intent> buildAppShortcuts() {
     const SingleActivator(LogicalKeyboardKey.keyB, control: true): const RunSubscriptionIntent(),
     const SingleActivator(LogicalKeyboardKey.keyT, control: true): const RunLatencyIntent(),
     const SingleActivator(LogicalKeyboardKey.period, control: true): const CancelRunIntent(),
-    const SingleActivator(LogicalKeyboardKey.escape): const CancelRunIntent(),
   };
 }

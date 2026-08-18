@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cfnb_app/core/config/app_config.dart';
-import 'package:cfnb_app/core/latency/latency_prober.dart';
 import 'package:cfnb_app/core/net/ip.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,30 +12,53 @@ double? parseLatency(String? s) {
   return double.tryParse(s.replaceAll(RegExp(r'[^0-9.]'), ''));
 }
 
-/// 结果行（对应旧版 ResultsPanel 的表格行）。
-/// 兼容新旧格式：`ip:port#CC source` 或 `ip:port#CC@source`
+/// 结果行。
+/// 格式：`ip:port#注释`（注释为原始节点名称，如"精品v4 1"）
 class ResultRow {
   final String node;
-  final String? latency; // "50.00 ms" 或 null
-  ResultRow(this.node, [this.latency]);
+  final String? latency;
+  final String? jitter;
+  ResultRow(this.node, [this.latency, this.jitter]);
 
   String get ipPort => node.split('#').first;
-  String get country => countryCodeToName(nodeCountry(node));
-  String get source {
+
+  /// # 后的全部内容 = 注释
+  String get annotation {
     final hashIdx = node.indexOf('#');
     if (hashIdx < 0) return '';
-    final afterHash = node.substring(hashIdx + 1);
-    // 优先找空格（新格式），再找 @（旧格式）
-    final spaceIdx = afterHash.indexOf(' ');
-    final atIdx = afterHash.indexOf('@');
-    int sepIdx = -1;
-    if (spaceIdx >= 0 && (atIdx < 0 || spaceIdx < atIdx)) {
-      sepIdx = spaceIdx;
-    } else if (atIdx >= 0) {
-      sepIdx = atIdx;
+    return node.substring(hashIdx + 1).trim();
+  }
+
+  /// 国家名称：注释中第一段（2字母大写）映射为中文名，如 "US mia" → "美国"
+  String get country {
+    final ann = annotation;
+    if (ann.isEmpty) return '';
+    // @ 分隔：US@cm → US
+    if (ann.contains('@')) return countryCodeToName(ann.split('@').first.trim());
+    // 空格分隔：US mia → US
+    final parts = ann.split(RegExp(r'\s+'));
+    final first = parts.first;
+    if (RegExp(r'^[A-Z]{2}$').hasMatch(first)) return countryCodeToName(first);
+    return '';
+  }
+
+  /// 来源/提供者：注释中国家码之后的部分；无国家码时为整个注释
+  String get source {
+    final ann = annotation;
+    if (ann.isEmpty) return '';
+    // @ 分隔：US@cm → cm
+    if (ann.contains('@')) {
+      final parts = ann.split('@');
+      return parts.length > 1 ? parts.sublist(1).join('@').trim() : '';
     }
-    if (sepIdx < 0) return '';
-    return afterHash.substring(sepIdx + 1).trim();
+    // 空格分隔：US mia → mia；洛璃 → 洛璃
+    final parts = ann.split(RegExp(r'\s+'));
+    final first = parts.first;
+    if (RegExp(r'^[A-Z]{2}$').hasMatch(first)) {
+      return parts.length > 1 ? parts.sublist(1).join(' ').trim() : '';
+    }
+    // 无国家码前缀，整个注释就是来源
+    return ann;
   }
 }
 
@@ -89,14 +111,37 @@ class ResultState {
   final String? currentFile;
   final String? rawText;
   final String? generatedAt; // 上次优选时间（来自 JSON 的 generated_at）
-  ResultState({this.rows = const [], this.sourceLabel, this.currentFile, this.rawText, this.generatedAt});
+  final String searchQuery; // 搜索关键词
+  final String? filterCountry; // 按国家过滤（null = 全部）
+  final double? filterMaxLatency; // 按最大延迟过滤（null = 不限）
+  final double? filterMaxJitter; // 按最大抖动过滤（null = 不限）
+
+  ResultState({
+    this.rows = const [],
+    this.sourceLabel,
+    this.currentFile,
+    this.rawText,
+    this.generatedAt,
+    this.searchQuery = '',
+    this.filterCountry,
+    this.filterMaxLatency,
+    this.filterMaxJitter,
+  });
+
   ResultState copyWith({
     List<ResultRow>? rows,
     String? sourceLabel,
     String? currentFile,
     String? rawText,
     String? generatedAt,
+    String? searchQuery,
+    String? filterCountry,
+    double? filterMaxLatency,
+    double? filterMaxJitter,
     bool clearFile = false,
+    bool clearCountry = false,
+    bool clearMaxLatency = false,
+    bool clearMaxJitter = false,
   }) =>
       ResultState(
         rows: rows ?? this.rows,
@@ -104,7 +149,25 @@ class ResultState {
         currentFile: clearFile ? null : (currentFile ?? this.currentFile),
         rawText: clearFile ? null : (rawText ?? this.rawText),
         generatedAt: clearFile ? null : (generatedAt ?? this.generatedAt),
+        searchQuery: searchQuery ?? this.searchQuery,
+        filterCountry: clearCountry ? null : (filterCountry ?? this.filterCountry),
+        filterMaxLatency: clearMaxLatency ? null : (filterMaxLatency ?? this.filterMaxLatency),
+        filterMaxJitter: clearMaxJitter ? null : (filterMaxJitter ?? this.filterMaxJitter),
       );
+
+  /// 过滤后的行：应用搜索
+  List<ResultRow> get filteredRows {
+    var result = rows;
+    if (searchQuery.isNotEmpty) {
+      final q = searchQuery.toLowerCase();
+      result = result
+          .where((r) =>
+              r.ipPort.toLowerCase().contains(q) ||
+              r.annotation.toLowerCase().contains(q))
+          .toList();
+    }
+    return result;
+  }
 }
 
 class ResultNotifier extends StateNotifier<ResultState> {
@@ -116,30 +179,57 @@ class ResultNotifier extends StateNotifier<ResultState> {
 
   /// 从文件加载（用于「刷新」与单步执行后）。
   /// 同时保存原始文本，供「查看文件内容」面板使用。
-  /// 若同名 .json 文件存在，读取其中的 generated_at 时间戳。
+  /// 若同名 .json 文件存在，读取其中的 generated_at 时间戳和 jitter_ms 数据。
   Future<void> loadFile(String path) async {
     final resolved = resolveOutputPath(path, (await getApplicationDocumentsDirectory()).path);
     final f = File(resolved);
     if (!f.existsSync()) {
-      state = state.copyWith(clearFile: true);
+      state = state.copyWith(clearFile: true, searchQuery: '', clearCountry: true, clearMaxLatency: true);
       return;
     }
     final text = await f.readAsString();
 
-    // 尝试从 .json 旁文件读取优选时间戳
+    // 尝试从 .json 旁文件读取优选时间戳和抖动数据
     String? generatedAt;
+    final jitterMap = <String, double>{}; // ip:port -> jitter_ms
     final jsonFile = File('$resolved.json');
     if (jsonFile.existsSync()) {
       try {
         final jsonData = jsonDecode(await jsonFile.readAsString());
-        if (jsonData is Map && jsonData['generated_at'] != null) {
-          generatedAt = jsonData['generated_at'].toString();
+        if (jsonData is Map) {
+          if (jsonData['generated_at'] != null) {
+            generatedAt = jsonData['generated_at'].toString();
+          }
+          final nodes = jsonData['nodes'] as List?;
+          if (nodes != null) {
+            for (final n in nodes) {
+              if (n is! Map) continue;
+              final ip = n['ip'] as String? ?? '';
+              final port = n['port'] as int? ?? 0;
+              final jitter = (n['jitter_ms'] as num?)?.toDouble();
+              if (ip.isNotEmpty && port > 0 && jitter != null) {
+                jitterMap['$ip:$port'] = jitter;
+              }
+            }
+          }
         }
       } catch (_) {}
     }
 
+    // 解析行并填充抖动数据
+    var rows = parseResultLines(text);
+    if (jitterMap.isNotEmpty) {
+      rows = rows.map((r) {
+        final jitter = jitterMap[r.ipPort];
+        if (jitter != null) {
+          return ResultRow(r.node, r.latency, '${jitter.toStringAsFixed(2)} ms');
+        }
+        return r;
+      }).toList();
+    }
+
     state = ResultState(
-      rows: parseResultLines(text),
+      rows: rows,
       sourceLabel: path.split(RegExp(r'[\\/]')).last,
       currentFile: path,
       rawText: text,
@@ -153,7 +243,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
         .where((l) => l.trim().isNotEmpty && !l.trim().startsWith('#'))
         .map((l) => ResultRow(l.trim()))
         .toList();
-    state = state.copyWith(rows: rows, sourceLabel: label);
+    state = state.copyWith(rows: rows, sourceLabel: label, searchQuery: '', clearCountry: true, clearMaxLatency: true);
   }
 
   /// 删除指定索引的节点。
@@ -180,6 +270,42 @@ class ResultNotifier extends StateNotifier<ResultState> {
     final line = rawLine.trim();
     if (line.isEmpty || !line.contains(':')) return;
     final rows = [...state.rows, ResultRow(line)];
+    state = state.copyWith(rows: rows);
+  }
+
+  /// 设置搜索关键词。
+  void setSearchQuery(String query) {
+    state = state.copyWith(searchQuery: query);
+  }
+
+  /// 设置国家过滤（null 表示全部）。
+  void setFilterCountry(String? country) {
+    state = state.copyWith(filterCountry: country, clearCountry: country == null);
+  }
+
+  /// 设置最大延迟过滤（null 表示不限）。
+  void setFilterMaxLatency(double? latency) {
+    state = state.copyWith(filterMaxLatency: latency, clearMaxLatency: latency == null);
+  }
+
+  /// 设置最大抖动过滤（null 表示不限）。
+  void setFilterMaxJitter(double? jitter) {
+    state = state.copyWith(filterMaxJitter: jitter, clearMaxJitter: jitter == null);
+  }
+
+  /// 清除所有过滤条件。
+  void clearFilters() {
+    state = state.copyWith(searchQuery: '', clearCountry: true, clearMaxLatency: true, clearMaxJitter: true);
+  }
+
+  /// 拖拽排序：将 [oldIndex] 处的行移动到 [newIndex]。
+  void reorderRow(int oldIndex, int newIndex) {
+    final rows = [...state.rows];
+    if (oldIndex < 0 || oldIndex >= rows.length) return;
+    if (newIndex > rows.length) newIndex = rows.length;
+    if (newIndex > oldIndex) newIndex--;
+    final row = rows.removeAt(oldIndex);
+    rows.insert(newIndex, row);
     state = state.copyWith(rows: rows);
   }
 

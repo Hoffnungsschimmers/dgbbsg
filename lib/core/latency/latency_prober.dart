@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:math' show sqrt;
 
@@ -41,23 +42,28 @@ typedef IpPort = String;
 ///
 /// 串行 [probes] 次连接，返回 (最小延迟, 抖动标准差, 成功次数)。
 /// 抖动越小表示节点越稳定。一次都没成功时返回 (null, null, 0)。
+/// [isCancelled] 非空时，每次探测前/后检查，中途中断。
 Future<(double?, double?, int)> measureLatency(
   String ip,
   int port,
   Duration timeout, {
   int probes = 1,
+  bool Function()? isCancelled,
 }) async {
   final latencies = <double>[];
   for (var i = 0; i < probes; i++) {
+    if (isCancelled != null && isCancelled()) break;
     final sw = Stopwatch()..start();
+    Socket? sock;
     try {
-      final sock = await Socket.connect(ip, port, timeout: timeout);
-      await sock.close();
+      sock = await Socket.connect(ip, port, timeout: timeout);
       latencies.add(sw.elapsedMilliseconds.toDouble());
     } on SocketException {
       // 本次失败，继续
     } on TimeoutException {
       // 本次超时，继续
+    } finally {
+      try { await sock?.close(); } catch (_) {}
     }
   }
   if (latencies.isEmpty) return (null, null, 0);
@@ -74,22 +80,26 @@ double _stdDev(List<double> values) {
   return variance.isNaN ? 0.0 : sqrt(variance);
 }
 
+/// 在 `#` 后的字符串中定位国家码与来源之间的分隔符位置。
+///
+/// 兼容新格式 `#HK CM`（空格分隔）和旧格式 `#HK@CM`（@ 分隔）。
+/// 返回第一个出现的空格或 @ 的索引，均不存在时返回 -1。
+int findCcSourceSep(String afterHash) {
+  final spaceIdx = afterHash.indexOf(' ');
+  final atIdx = afterHash.indexOf('@');
+  if (spaceIdx >= 0 && (atIdx < 0 || spaceIdx < atIdx)) return spaceIdx;
+  if (atIdx >= 0) return atIdx;
+  return -1;
+}
+
 /// 提取节点注释里的国家码（# 之后、来源之前）。
 /// 兼容新格式 `#HK CM` 和旧格式 `#HK@CM`。
 String nodeCountry(String node) {
   final hashIdx = node.indexOf('#');
   if (hashIdx < 0) return '';
   final afterHash = node.substring(hashIdx + 1);
-  // 国家码在空格或 @ 之前
-  final spaceIdx = afterHash.indexOf(' ');
-  final atIdx = afterHash.indexOf('@');
-  int endIdx = afterHash.length;
-  if (spaceIdx >= 0 && (atIdx < 0 || spaceIdx < atIdx)) {
-    endIdx = spaceIdx;
-  } else if (atIdx >= 0) {
-    endIdx = atIdx;
-  }
-  return afterHash.substring(0, endIdx).trim();
+  final sepIdx = findCcSourceSep(afterHash);
+  return afterHash.substring(0, sepIdx >= 0 ? sepIdx : afterHash.length).trim();
 }
 
 /// 延迟测试结果。
@@ -112,14 +122,18 @@ Future<(List<LatencyResult>, int tested, int connected)> latencyProbeAll(
   required int workers,
   int probes = 1,
   double minSuccessRate = 1.0,
+  int? earlyStopCount,
+  double maxLatency = 0,
   Map<String, String>? nodeSource,
-  Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes})? probe,
+  Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes, bool Function()? isCancelled})? probe,
   void Function(String)? onLog,
   /// 取消检查：返回 true 时跳过后续节点探测。
   bool Function()? isCancelled,
   /// 节点完成回调：每完成一个节点探测即时触发（不节流），
   /// 携带 (done=已探测, total=总节点数, connected=已连通) 供 UI 进度条精确刷新。
   void Function(int done, int total, int connected)? onProgress,
+  /// 单个结果回调：每完成一个达标探测即时触发，供 UI 实时显示结果。
+  void Function(LatencyResult result)? onResult,
 }) async {
   final logBuf = <String>[];
   Timer? flushTimer;
@@ -139,48 +153,85 @@ Future<(List<LatencyResult>, int tested, int connected)> latencyProbeAll(
   }
 
   final targets = <(String, IpPort, int)>[];
+  var parseFailed = 0;
   for (final node in nodes) {
     final ep = parseEndpoint(node);
-    if (ep != null) targets.add((node, ep.$1, ep.$2));
+    if (ep != null) {
+      targets.add((node, ep.$1, ep.$2));
+    } else {
+      parseFailed++;
+    }
+  }
+
+  if (targets.isEmpty) {
+    onLog?.call('警告：${nodes.length} 行数据中无有效节点格式（期望 ip:port#CC）。'
+        '${parseFailed > 0 ? " $parseFailed 行解析失败。" : ""}');
+    return (<LatencyResult>[], nodes.length, 0);
+  }
+  if (parseFailed > 0) {
+    onLog?.call('提示：$parseFailed 行无法解析为 ip:port 格式，已跳过。');
   }
 
   final results = <LatencyResult>[];
   final semaphore = _Semaphore(workers);
   var done = 0;
   var connected = 0;
-  var cancelled = false;
+  var qualified = 0; // 连通 + 满足成功率 + 延迟 ≤ maxLatency 的节点数
+  var stopped = false;
+
+  bool shouldStop() {
+    if (stopped) return true;
+    if (isCancelled != null && isCancelled()) return true;
+    if (earlyStopCount != null && qualified >= earlyStopCount) return true;
+    return false;
+  }
+
   await Future.wait(targets.map((t) async {
-    // 排队前检查取消：避免已排队的 future 逐个等 semaphore
-    if (cancelled || (isCancelled != null && isCancelled())) {
-      cancelled = true;
+    if (shouldStop()) {
+      stopped = true;
+      semaphore.cancel();
       return;
     }
     await semaphore.acquire();
     try {
-      // 获取信号量后再次检查取消
-      if (cancelled || (isCancelled != null && isCancelled())) {
-        cancelled = true;
+      // 先计数，再探测，跳过也计数
+      done++;
+      onProgress?.call(done, targets.length, connected);
+      if (shouldStop()) {
+        stopped = true;
+        semaphore.cancel();
         return;
       }
-      final (lat, jitter, ok) = await (probe ?? measureLatency)(t.$2, t.$3, timeout, probes: probes);
-      // 探测完成后检查取消
-      if (cancelled || (isCancelled != null && isCancelled())) {
-        cancelled = true;
+      final (lat, jitter, ok) = await (probe ?? measureLatency)(
+        t.$2, t.$3, timeout,
+        probes: probes,
+        isCancelled: shouldStop,
+      );
+      if (shouldStop()) {
+        stopped = true;
+        semaphore.cancel();
         return;
       }
-      // 成功率过滤
       final rate = probes > 0 ? ok / probes : 0.0;
       final okLat = (lat != null && rate >= minSuccessRate);
       if (okLat) {
-        results.add(LatencyResult(t.$1, lat, jitter, ok));
+        final result = LatencyResult(t.$1, lat, jitter, ok);
+        results.add(result);
+        connected++;
+        // 只有延迟也达标才算 qualified
+        if (maxLatency <= 0 || lat <= maxLatency) {
+          qualified++;
+          onResult?.call(result);
+        }
       } else {
         results.add(LatencyResult(t.$1, null, null, ok));
       }
-      // 单节点明细日志（每测完一个即输出 ip 与其延迟/结果）
-      done++;
-      if (okLat) connected++;
-      // 即时进度回调（不节流，UI 层自管刷新节流，见 SubscriptionsNotifier）。
-      onProgress?.call(done, targets.length, connected);
+      // 达标数够结果限制就停止
+      if (earlyStopCount != null && qualified >= earlyStopCount) {
+        stopped = true;
+        semaphore.cancel();
+        onLog?.call('达标 $qualified 个（延迟≤${maxLatency.round()}ms），达到结果限制 $earlyStopCount，停止扫描。');
+      }
       final ep = '${t.$2}:${t.$3}';
       final line = okLat
           ? '  [$done/${targets.length}] $ep  ${lat.toStringAsFixed(1)} ms'
@@ -205,13 +256,112 @@ Future<(List<LatencyResult>, int tested, int connected)> latencyProbeAll(
   return (ordered, targets.length, succeeded.length);
 }
 
-/// 简易信号量，限制并发连接数。
+/// 多端口延迟探测：对同一 IP 依次探测 [ports] 列表中的每个端口，
+/// 返回延迟最低的端口结果。
+///
+/// 返回 (最小延迟, 抖动, 成功次数, 最佳端口)。
+/// 所有端口均失败时返回 (null, null, 0, 0)。
+Future<(double?, double?, int, int)> measureLatencyMultiPort(
+  String ip,
+  List<int> ports,
+  Duration timeout, {
+  int probes = 1,
+  Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes, bool Function()? isCancelled})? probe,
+}) async {
+  double? bestLat;
+  double? bestJitter;
+  int bestOk = 0;
+  int bestPort = 0;
+
+  for (final port in ports) {
+    final (lat, jitter, ok) = await (probe ?? measureLatency)(ip, port, timeout, probes: probes);
+    if (lat != null && (bestLat == null || lat < bestLat)) {
+      bestLat = lat;
+      bestJitter = jitter;
+      bestOk = ok;
+      bestPort = port;
+    }
+  }
+
+  if (bestLat == null) return (null, null, 0, 0);
+  return (bestLat, bestJitter, bestOk, bestPort);
+}
+
+/// 多端口版延迟批量探测，包装 [latencyProbeAll]。
+///
+/// [extraPorts] 非空时，对每个节点额外探测这些端口，取最佳结果。
+/// [extraPorts] 为空时行为与 [latencyProbeAll] 完全一致。
+Future<(List<LatencyResult>, int tested, int connected)> latencyProbeAllMultiPort(
+  List<String> nodes, {
+  required Duration timeout,
+  required int workers,
+  int probes = 1,
+  double minSuccessRate = 1.0,
+  List<int> extraPorts = const [],
+  Map<String, String>? nodeSource,
+  Future<(double?, double?, int)> Function(String ip, int port, Duration timeout, {int probes, bool Function()? isCancelled})? probe,
+  void Function(String)? onLog,
+  bool Function()? isCancelled,
+  void Function(int done, int total, int connected)? onProgress,
+}) async {
+  // 无额外端口时直接委托给原始函数
+  if (extraPorts.isEmpty) {
+    return latencyProbeAll(
+      nodes,
+      timeout: timeout,
+      workers: workers,
+      probes: probes,
+      minSuccessRate: minSuccessRate,
+      nodeSource: nodeSource,
+      probe: probe,
+      onLog: onLog,
+      isCancelled: isCancelled,
+      onProgress: onProgress,
+    );
+  }
+
+  // 包装 probe 为多端口版本
+  Future<(double?, double?, int)> multiPortProbe(
+    String ip,
+    int port,
+    Duration t, {
+    int probes = 1,
+    bool Function()? isCancelled,
+  }) async {
+    final allPorts = [port, ...extraPorts];
+    final (lat, jitter, ok, _) = await measureLatencyMultiPort(
+      ip,
+      allPorts,
+      t,
+      probes: probes,
+      probe: probe,
+    );
+    return (lat, jitter, ok);
+  }
+
+  return latencyProbeAll(
+    nodes,
+    timeout: timeout,
+    workers: workers,
+    probes: probes,
+    minSuccessRate: minSuccessRate,
+    nodeSource: nodeSource,
+    probe: multiPortProbe,
+    onLog: onLog,
+    isCancelled: isCancelled,
+    onProgress: onProgress,
+  );
+}
+
+/// 简易信号量，限制并发连接数。支持 [cancel] 立即释放所有等待者。
 class _Semaphore {
   int _count;
-  final _queue = <Completer<void>>[];
+  final _queue = ListQueue<Completer<void>>();
+  bool _cancelled = false;
   _Semaphore(this._count);
 
   Future<void> acquire() async {
+    if (_cancelled) return;
     if (_count > 0) {
       _count--;
       return;
@@ -223,9 +373,17 @@ class _Semaphore {
 
   void release() {
     if (_queue.isNotEmpty) {
-      _queue.removeAt(0).complete();
+      _queue.removeFirst().complete();
     } else {
       _count++;
+    }
+  }
+
+  /// 立即释放所有排队中的 acquire()，使其不再阻塞。
+  void cancel() {
+    _cancelled = true;
+    while (_queue.isNotEmpty) {
+      _queue.removeFirst().complete();
     }
   }
 }

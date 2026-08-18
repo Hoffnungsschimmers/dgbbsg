@@ -5,10 +5,8 @@
 /// 中的旧键（CF DNS / WxPusher / ASN / 可用性 / 广告 / 旧筛选等）读时忽略，向后兼容。
 class AppConfig {
   // ============ 订阅转换 ============
-  final bool subConvertEnabled;
   final String subInputMode;
   final List<String> subUrls;
-  final bool subUrlsEnabled;
   final Set<String> subDisabledUrls;
   final String subNodeHost;
   final String subNodeUuid;
@@ -37,14 +35,36 @@ class AppConfig {
   final String githubRepo;
   final String githubBranch;
 
+  // ============ 自动更新 ============
+  final bool subAutoUpdateEnabled;    // 是否启用自动更新
+  final int subAutoUpdateIntervalMin; // 自动更新间隔（分钟），默认 60
+  final bool subAutoUpdateRunLatency; // 自动更新后是否自动运行延迟优选
+
+  // ============ Webhook 通知 ============
+  final String webhookUrl;        // Webhook URL (Telegram/Discord)
+  final String webhookType;       // 'telegram' | 'discord' | 'none'
+  final bool webhookOnComplete;   // 任务完成时通知
+  final bool webhookOnError;      // 任务失败时通知
+
+  // ============ 扫描器 ============
+  final int scannerPort;
+  final int scannerBackupPort;
+  final int scannerConcurrency;
+  final int scannerDelayThreshold;
+  final int scannerResultLimit;
+  final int scannerSpeedThreads;
+  final double scannerSpeedThreshold;
+  final int scannerSpeedResultLimit;
+
   // ============ 外观 ============
   final String guiTheme;
 
+  // ============ 引导 ============
+  final bool hasCompletedOnboarding;
+
   const AppConfig({
-    this.subConvertEnabled = true,
     this.subInputMode = 'both',
     this.subUrls = const [],
-    this.subUrlsEnabled = true,
     this.subDisabledUrls = const {},
     this.subNodeHost = 'example.com',
     this.subNodeUuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx',
@@ -68,13 +88,36 @@ class AppConfig {
     this.githubToken = '',
     this.githubRepo = 'Hoffnungsschimmers/cf-ip',
     this.githubBranch = 'main',
+    this.subAutoUpdateEnabled = false,
+    this.subAutoUpdateIntervalMin = 60,
+    this.subAutoUpdateRunLatency = false,
+    this.webhookUrl = '',
+    this.webhookType = 'none',
+    this.webhookOnComplete = true,
+    this.webhookOnError = true,
+    this.scannerPort = 443,
+    this.scannerBackupPort = 80,
+    this.scannerConcurrency = 100,
+    this.scannerDelayThreshold = 300,
+    this.scannerResultLimit = 100,
+    this.scannerSpeedThreads = 5,
+    this.scannerSpeedThreshold = 1.0,
+    this.scannerSpeedResultLimit = 50,
     this.guiTheme = 'light',
+    this.hasCompletedOnboarding = false,
   });
 
   factory AppConfig.fromJson(Map<String, dynamic> json) {
     T pick<T>(String key, T fallback) {
       final v = json[key];
-      return v is T ? v : fallback;
+      if (v is T) return v;
+      // 兼容字符串→数字的类型强转（如 "50" → 50）
+      if (T == int && v is num) return v.toInt() as T;
+      if (T == double && v is num) return v.toDouble() as T;
+      if (T == int && v is String) { final n = int.tryParse(v); if (n != null) return n as T; }
+      if (T == double && v is String) { final n = double.tryParse(v); if (n != null) return n as T; }
+      if (T == bool && v is String) { final b = v.toLowerCase(); if (b == 'true') return true as T; if (b == 'false') return false as T; }
+      return fallback;
     }
     List<String> pickStrList(String key, List<String> fallback) {
       final v = json[key];
@@ -88,14 +131,12 @@ class AppConfig {
       return fallback;
     }
     return AppConfig(
-      subConvertEnabled: pick('SUB_CONVERT_ENABLED', true),
       subInputMode: pick('SUB_INPUT_MODE', 'both'),
       subUrls: pickStrList('SUB_URLS', const []),
-      subUrlsEnabled: pick('SUB_URLS_ENABLED', true),
       subDisabledUrls: pickStrSet('SUB_DISABLED_URLS', const {}),
       subNodeHost: pick('SUB_NODE_HOST', 'example.com'),
       subNodeUuid: pick('SUB_NODE_UUID', 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'),
-      subGenerators: pickStrList('SUB_GENERATORS', const []),
+      subGenerators: pickStrList('SUB_GENERATORS', defaultSubGenerators),
       subDisabledGenerators: pickStrSet('SUB_DISABLED_GENERATORS', const {}),
       subOutputFile: pick('SUB_OUTPUT_FILE', 'addressesapi.txt'),
       subDefaultCountry: pick('SUB_DEFAULT_COUNTRY', ''),
@@ -115,15 +156,29 @@ class AppConfig {
       githubToken: pick('GITHUB_TOKEN', ''),
       githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/cf-ip'),
       githubBranch: pick('GITHUB_BRANCH', 'main'),
+      subAutoUpdateEnabled: pick('SUB_AUTO_UPDATE_ENABLED', false),
+      subAutoUpdateIntervalMin: pick('SUB_AUTO_UPDATE_INTERVAL_MIN', 60),
+      subAutoUpdateRunLatency: pick('SUB_AUTO_UPDATE_RUN_LATENCY', false),
+      webhookUrl: pick('WEBHOOK_URL', ''),
+      webhookType: pick('WEBHOOK_TYPE', 'none'),
+      webhookOnComplete: pick('WEBHOOK_ON_COMPLETE', true),
+      webhookOnError: pick('WEBHOOK_ON_ERROR', true),
+      scannerPort: pick('SCANNER_PORT', 443),
+      scannerBackupPort: pick('SCANNER_BACKUP_PORT', 80),
+      scannerConcurrency: pick('SCANNER_CONCURRENCY', 100),
+      scannerDelayThreshold: pick('SCANNER_DELAY_THRESHOLD', 300),
+      scannerResultLimit: pick('SCANNER_RESULT_LIMIT', 100),
+      scannerSpeedThreads: pick('SCANNER_SPEED_THREADS', 5),
+      scannerSpeedThreshold: (pick('SCANNER_SPEED_THRESHOLD', 1.0) as num).toDouble(),
+      scannerSpeedResultLimit: pick('SCANNER_SPEED_RESULT_LIMIT', 50),
       guiTheme: pick('GUI_THEME', 'light'),
+      hasCompletedOnboarding: pick('HAS_COMPLETED_ONBOARDING', false),
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'SUB_CONVERT_ENABLED': subConvertEnabled,
         'SUB_INPUT_MODE': subInputMode,
         'SUB_URLS': subUrls,
-        'SUB_URLS_ENABLED': subUrlsEnabled,
         'SUB_DISABLED_URLS': subDisabledUrls.toList(),
         'SUB_NODE_HOST': subNodeHost,
         'SUB_NODE_UUID': subNodeUuid,
@@ -147,14 +202,28 @@ class AppConfig {
         'GITHUB_TOKEN': githubToken,
         'GITHUB_REPO': githubRepo,
         'GITHUB_BRANCH': githubBranch,
+        'SUB_AUTO_UPDATE_ENABLED': subAutoUpdateEnabled,
+        'SUB_AUTO_UPDATE_INTERVAL_MIN': subAutoUpdateIntervalMin,
+        'SUB_AUTO_UPDATE_RUN_LATENCY': subAutoUpdateRunLatency,
+        'WEBHOOK_URL': webhookUrl,
+        'WEBHOOK_TYPE': webhookType,
+        'WEBHOOK_ON_COMPLETE': webhookOnComplete,
+        'WEBHOOK_ON_ERROR': webhookOnError,
+        'SCANNER_PORT': scannerPort,
+        'SCANNER_BACKUP_PORT': scannerBackupPort,
+        'SCANNER_CONCURRENCY': scannerConcurrency,
+        'SCANNER_DELAY_THRESHOLD': scannerDelayThreshold,
+        'SCANNER_RESULT_LIMIT': scannerResultLimit,
+        'SCANNER_SPEED_THREADS': scannerSpeedThreads,
+        'SCANNER_SPEED_THRESHOLD': scannerSpeedThreshold,
+        'SCANNER_SPEED_RESULT_LIMIT': scannerSpeedResultLimit,
         'GUI_THEME': guiTheme,
+        'HAS_COMPLETED_ONBOARDING': hasCompletedOnboarding,
       };
 
   AppConfig copyWith({
-    bool? subConvertEnabled,
     String? subInputMode,
     List<String>? subUrls,
-    bool? subUrlsEnabled,
     Set<String>? subDisabledUrls,
     String? subNodeHost,
     String? subNodeUuid,
@@ -178,13 +247,27 @@ class AppConfig {
     String? githubToken,
     String? githubRepo,
     String? githubBranch,
+    bool? subAutoUpdateEnabled,
+    int? subAutoUpdateIntervalMin,
+    bool? subAutoUpdateRunLatency,
+    String? webhookUrl,
+    String? webhookType,
+    bool? webhookOnComplete,
+    bool? webhookOnError,
+    int? scannerPort,
+    int? scannerBackupPort,
+    int? scannerConcurrency,
+    int? scannerDelayThreshold,
+    int? scannerResultLimit,
+    int? scannerSpeedThreads,
+    double? scannerSpeedThreshold,
+    int? scannerSpeedResultLimit,
     String? guiTheme,
+    bool? hasCompletedOnboarding,
   }) {
     return AppConfig(
-      subConvertEnabled: subConvertEnabled ?? this.subConvertEnabled,
       subInputMode: subInputMode ?? this.subInputMode,
       subUrls: subUrls ?? this.subUrls,
-      subUrlsEnabled: subUrlsEnabled ?? this.subUrlsEnabled,
       subDisabledUrls: subDisabledUrls ?? this.subDisabledUrls,
       subNodeHost: subNodeHost ?? this.subNodeHost,
       subNodeUuid: subNodeUuid ?? this.subNodeUuid,
@@ -208,7 +291,23 @@ class AppConfig {
       githubToken: githubToken ?? this.githubToken,
       githubRepo: githubRepo ?? this.githubRepo,
       githubBranch: githubBranch ?? this.githubBranch,
+      subAutoUpdateEnabled: subAutoUpdateEnabled ?? this.subAutoUpdateEnabled,
+      subAutoUpdateIntervalMin: subAutoUpdateIntervalMin ?? this.subAutoUpdateIntervalMin,
+      subAutoUpdateRunLatency: subAutoUpdateRunLatency ?? this.subAutoUpdateRunLatency,
+      webhookUrl: webhookUrl ?? this.webhookUrl,
+      webhookType: webhookType ?? this.webhookType,
+      webhookOnComplete: webhookOnComplete ?? this.webhookOnComplete,
+      webhookOnError: webhookOnError ?? this.webhookOnError,
+      scannerPort: scannerPort ?? this.scannerPort,
+      scannerBackupPort: scannerBackupPort ?? this.scannerBackupPort,
+      scannerConcurrency: scannerConcurrency ?? this.scannerConcurrency,
+      scannerDelayThreshold: scannerDelayThreshold ?? this.scannerDelayThreshold,
+      scannerResultLimit: scannerResultLimit ?? this.scannerResultLimit,
+      scannerSpeedThreads: scannerSpeedThreads ?? this.scannerSpeedThreads,
+      scannerSpeedThreshold: scannerSpeedThreshold ?? this.scannerSpeedThreshold,
+      scannerSpeedResultLimit: scannerSpeedResultLimit ?? this.scannerSpeedResultLimit,
       guiTheme: guiTheme ?? this.guiTheme,
+      hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );
   }
 
@@ -217,6 +316,27 @@ class AppConfig {
     final errors = <String>[];
     if (!['node', 'url', 'both'].contains(subInputMode)) {
       errors.add("SUB_INPUT_MODE 必须是 'node'、'url' 或 'both'");
+    }
+    if (subLatencyTimeout <= 0) {
+      errors.add('延迟探测超时必须为正数');
+    }
+    if (subLatencyWorkers < 1 || subLatencyWorkers > 500) {
+      errors.add('并发线程数必须在 1-500 之间');
+    }
+    if (subLatencyProbes < 1 || subLatencyProbes > 20) {
+      errors.add('探测次数必须在 1-20 之间');
+    }
+    if (subFetchTimeout < 1) {
+      errors.add('订阅抓取超时必须 ≥ 1 秒');
+    }
+    if (subAutoUpdateIntervalMin < 5) {
+      errors.add('自动更新间隔必须 ≥ 5 分钟');
+    }
+    if (webhookType != 'none' && webhookUrl.isEmpty) {
+      errors.add('已选择 Webhook 类型但 URL 为空');
+    }
+    if (webhookType != 'none' && !['telegram', 'discord'].contains(webhookType)) {
+      errors.add("WEBHOOK_TYPE 必须是 'telegram'、'discord' 或 'none'");
     }
     return errors;
   }

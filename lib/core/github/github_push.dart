@@ -17,7 +17,7 @@ class GithubPush {
   final Dio dio;
 
   /// 可选：自定义请求发送器，便于测试注入假网络层。
-  final Future<Response> Function(RequestOptions)? sender;
+  final Future<Response<dynamic>> Function(RequestOptions)? sender;
 
   /// 共享直连 Dio：自动读取 Windows 系统代理（注册表），适用于订阅抓取等
   /// 需经本地代理可达源的请求。Dart 的 HttpClient 不读 Windows 注册表代理，
@@ -38,7 +38,7 @@ class GithubPush {
   /// 因为中间代理（如 Clash/V2RayN）可能使用自签证书进行 MITM。
   /// GitHub API 走 DIRECT 直连（见构造函数），不受此影响。
   static void _applySystemProxy(Dio dio) {
-    final proxy = readWindowsSystemProxy();
+    final proxy = readSystemProxy();
     if (proxy == null) return;
     final adapter = dio.httpClientAdapter;
     if (adapter is IOHttpClientAdapter) {
@@ -64,7 +64,7 @@ class GithubPush {
   }) : dio = dio ??
         Dio(BaseOptions(
           baseUrl: 'https://api.github.com',
-          validateStatus: (_) => true,
+          validateStatus: (code) => code != null && (code >= 200 && code < 500),
           connectTimeout: const Duration(seconds: 15),
           receiveTimeout: const Duration(seconds: 20),
           headers: {
@@ -106,7 +106,7 @@ class GithubPush {
     );
   }
 
-  Future<Response> _send(RequestOptions options) => sender != null
+  Future<Response<dynamic>> _send(RequestOptions options) => sender != null
       ? sender!(options)
       : dio.fetch(options);
 
@@ -128,7 +128,10 @@ class GithubPush {
   /// 推送单个文件内容到仓库，返回 HTTP 状态码。
   /// [path] 可以是绝对路径（如 `C:/Users/.../addressesapi_top.txt`）或纯文件名；
   /// GitHub API 路径自动提取文件名部分。
-  Future<int> pushFile(String path, String content, {String? message}) async {
+  ///
+  /// 当 [maxRetries] > 0 时，遇到 422 SHA 冲突会自动重新拉取 SHA 并重试
+  /// （最多 [maxRetries] 次），实现无感知冲突解决。
+  Future<int> pushFile(String path, String content, {String? message, int maxRetries = 2}) async {
     // Token 有效性自检：401 立即给出明确提示，避免看 GitHub 原始报错。
     try {
       final who = await _send(_req('GET', '/user'));
@@ -145,47 +148,81 @@ class GithubPush {
         ? path.split(RegExp(r'[/\\]')).last
         : path;
     final url = '/repos/$repo/contents/$fileName';
-    String? sha;
-    try {
-      final existing = await _send(_req('GET', url));
-      final code = existing.statusCode ?? 0;
-      if (code == 404) {
-        // 文件不存在，新建
-      } else if (code >= 200 && code < 300) {
-        sha = (existing.data is Map ? existing.data['sha'] as String? : null);
-      } else {
-        throw Exception('GitHub GET $url 返回 HTTP $code，无法判断文件是否存在');
-      }
-    } on DioException catch (e) {
-      // 网络层异常（DNS/超时/连接拒绝）不应静默当作"文件不存在"
-      if (e.response?.statusCode == 404) {
-        // 文件不存在，新建
-      } else {
-        throw Exception('GitHub GET $url 网络异常：${e.message ?? e}');
-      }
-    }
 
-    final body = buildPutBody(
-      path: fileName,
-      content: content,
-      branch: branch,
-      message: message,
-      sha: sha,
-    );
-    final resp = await _send(_req('PUT', url, data: body));
-    final code = resp.statusCode ?? 0;
-    if (code == 401) {
-      throw Exception(
-          'GitHub 401：Token 无效或无该仓库访问权。请检查：① Token 是否完整无空格/换行；② Repo 是否拼写为「owner/仓名」且 Token 有 repo 权限；③ 该仓确实存在');
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      String? sha;
+      try {
+        final existing = await _send(_req('GET', url));
+        final code = existing.statusCode ?? 0;
+        if (code == 404) {
+          // 文件不存在，新建
+        } else if (code >= 200 && code < 300) {
+          sha = (existing.data is Map ? existing.data['sha'] as String? : null);
+        } else {
+          throw Exception('GitHub GET $url 返回 HTTP $code，无法判断文件是否存在');
+        }
+      } on DioException catch (e) {
+        if (e.response?.statusCode == 404) {
+          // 文件不存在，新建
+        } else {
+          throw Exception('GitHub GET $url 网络异常：${e.message ?? e}');
+        }
+      }
+
+      final body = buildPutBody(
+        path: fileName,
+        content: content,
+        branch: branch,
+        message: message,
+        sha: sha,
+      );
+      final resp = await _send(_req('PUT', url, data: body));
+      final code = resp.statusCode ?? 0;
+      if (code == 401) {
+        throw Exception(
+            'GitHub 401：Token 无效或无该仓库访问权。请检查：① Token 是否完整无空格/换行；② Repo 是否拼写为「owner/仓名」且 Token 有 repo 权限；③ 该仓确实存在');
+      }
+      if (code == 422 && attempt < maxRetries) {
+        // SHA 冲突：远程文件被他人修改，自动重新拉取 SHA 重试
+        continue;
+      }
+      if (code == 422) {
+        throw Exception('GitHub 422：文件 SHA 不匹配（已重试 $maxRetries 次），远程文件可能被频繁修改');
+      }
+      if (code < 200 || code >= 300) {
+        final msg = resp.data is Map ? (resp.data['message'] ?? '') : '';
+        throw Exception('GitHub PUT 失败：HTTP $code $msg');
+      }
+      return code;
     }
-    if (code == 422) {
-      throw Exception('GitHub 422：文件 SHA 不匹配，可能并发修改导致冲突，请重试');
+    throw Exception('GitHub 推送失败：重试耗尽');
+  }
+
+  /// 从 GitHub 拉取文件内容，返回 (content, sha)。
+  /// 文件不存在时返回 (null, null)。sha 用于后续更新时传给 PUT API。
+  Future<(String? content, String? sha)> pullFile(String path) async {
+    final fileName = path.contains('/') || path.contains('\\')
+        ? path.split(RegExp(r'[/\\]')).last
+        : path;
+    final url = '/repos/$repo/contents/$fileName';
+    try {
+      final resp = await _send(_req('GET', url));
+      final code = resp.statusCode ?? 0;
+      if (code == 404) return (null, null);
+      if (code < 200 || code >= 300) {
+        throw Exception('GitHub GET $url 返回 HTTP $code');
+      }
+      final data = resp.data;
+      if (data is! Map) return (null, null);
+      final sha = data['sha'] as String?;
+      final encoded = data['content'] as String?;
+      if (encoded == null) return (null, sha);
+      final content = utf8.decode(base64Decode(encoded.replaceAll('\n', '')));
+      return (content, sha);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return (null, null);
+      throw Exception('GitHub GET $url 网络异常：${e.message ?? e}');
     }
-    if (code < 200 || code >= 300) {
-      final msg = resp.data is Map ? (resp.data['message'] ?? '') : '';
-      throw Exception('GitHub PUT 失败：HTTP $code $msg');
-    }
-    return code;
   }
 
   /// 批量推送多个文件，返回 路径 -> HTTP 状态码 的映射。

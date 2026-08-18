@@ -6,22 +6,11 @@ import 'package:crypto/crypto.dart' as crypto;
 import '../config/app_config.dart';
 import '../fetch/node_parser.dart';
 import '../latency/latency_prober.dart';
-import '../net/ip.dart';
 import 'sub_parser.dart';
 
 /// edgetunnel 系订阅器要求的 User-Agent（含项目特征串），用于触发
 /// "优选订阅生成器(BEST_SUB)"模式并放行部分被 UA 拦截的实例。
 const String edgetunnelUa = 'v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel)';
-
-const _supportedSchemes = [
-  'vless://',
-  'vmess://',
-  'trojan://',
-  'ss://',
-  'hysteria2://',
-  'hy2://',
-  'tuic://',
-];
 
 /// 判断节点是否为垃圾/广告。
 /// 常见模式：超长子域名（伪装成 Telegram 推广链接）、含推广关键词。
@@ -188,7 +177,7 @@ Future<String> fetchSingle(String url, SubFetcher fetch, {String label = ''}) as
     final after = url.substring(pipeIdx + 1).trim();
     if (after.isNotEmpty) url = after;
   }
-  if (_supportedSchemes.any((s) => url.startsWith(s))) return url;
+  if (supportedSchemes.any((s) => url.startsWith(s))) return url;
   final real = resolveSubUrl(url);
   return fetch(real, label: label);
 }
@@ -206,7 +195,7 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
         return content; // 找到有效节点，立即返回，跳过剩余 URL
       }
       fallback ??= content;
-    } on Object catch (e) {
+    } on Exception catch (e) {
       onLog?.call('  [回退] $u 失败：$e');
     }
   }
@@ -233,8 +222,6 @@ Future<List<String>> convertSubscriptions(
   if (tasks.isEmpty) return <String>[];
 
   final rawNodes = <({String host, int port, String name, String source})>[];
-  final state = <String, Map<String, dynamic>>{};
-  final now = DateTime.now().millisecondsSinceEpoch / 1000;
 
     for (final (name, urls) in tasks) {
       onLog?.call('━━━ $name ━━━');
@@ -270,115 +257,39 @@ Future<List<String>> convertSubscriptions(
       } else {
         onLog?.call('[-] $name：所有 URL 均拉取失败或未解析出节点。');
       }
-      state[name] = {'ok': got > 0, 'nodes': got, 'ts': now};
     }
 
   if (rawNodes.isEmpty) return <String>[];
 
-  final defaultCc = config.subDefaultCountry.toUpperCase();
   final hosts = <String>{for (final r in rawNodes) r.host};
   final resolved = <String, String?>{};
   if (config.subResolveDomain) {
-    // 解析域名为 IP（用于延迟测试）
     await Future.wait(hosts.map((h) async {
       resolved[h] = await resolve(h);
     }));
   } else {
-    // 不解析：IP 直接用，域名也保留原样
     for (final h in hosts) {
       resolved[h] = h;
     }
   }
 
-  // 第一轮：从节点名提取国家码，过滤垃圾节点
-  final nodeEntries = <({String ip, int port, String cc, String source})>[];
-  final spamNodes = <String>[];
+  // 组装节点列表（不去重，不做地理定位）
+  final nodes = <String>[];
   for (final r in rawNodes) {
     final ip = resolved[r.host];
     if (ip == null || ip.isEmpty) continue;
-    // 过滤垃圾/广告节点：子域名过长（>60字符）或含推广关键词
-    if (_isSpamNode(r.host)) {
-      spamNodes.add('${r.host}:${r.port}');
-      continue;
-    }
-    var cc = parser.extractCountryCode(r.name) ?? defaultCc;
-    // "CF" 在订阅源中常表示 Cloudflare（如 "CF 电信优选"），不是中非共和国。
-    // 若 "CF" 后跟中文 ISP 关键词或纯中文，清除国家码让 geolocation 重新判定。
-    if (cc == 'CF' && RegExp(r'CF\s*[\u4e00-\u9fff]').hasMatch(r.name)) {
-      cc = '';
-    }
-    nodeEntries.add((ip: ip, port: r.port, cc: cc, source: r.source));
-  }
-  if (spamNodes.isNotEmpty) {
-    onLog?.call('过滤掉 ${spamNodes.length} 个垃圾/广告节点：');
-    for (final n in spamNodes) {
-      onLog?.call('  🚫 $n');
-    }
+    if (_isSpamNode(r.host)) continue;
+    // IPv6 需要方括号包裹
+    final addr = ip.contains(':') ? '[$ip]' : ip;
+    final anno = r.name.trim();
+    // 标准化国家码（中文名/三字母码 → 两位码）
+    final cc = anno.isNotEmpty ? parser.extractCountryCode(anno) : null;
+    final tag = cc ?? anno;
+    final node = tag.isNotEmpty ? '$addr:${r.port}#$tag' : '$addr:${r.port}';
+    nodes.add(node);
   }
 
-  // 第二轮：对需要地理查询的 IP 先尝试 cdn-cgi/trace。
-  // 需要查询的 IP = 无国家码 或 国家码可疑（如 "CF" 通常是 ip-api.com 的错误返回）。
-  // 域名跳过地理查询（CDN 域名背后 IP 因地区而异，查不准）。
-  final geoCache = <String, String>{}; // ip -> cc
-  final ipsToGeolocate = <String>{};
-  for (final e in nodeEntries) {
-    if (isIp(e.ip) && (e.cc.isEmpty || e.cc == 'CF')) {
-      ipsToGeolocate.add(e.ip);
-    }
-  }
-  if (ipsToGeolocate.isNotEmpty) {
-    onLog?.call('正在通过 cdn-cgi/trace 识别 ${ipsToGeolocate.length} 个 IP 的地区…');
-    final traceResults = await Future.wait(
-      ipsToGeolocate.map((ip) async => MapEntry(ip, await geolocateCfIp(ip, proxy: proxy))),
-    );
-    for (final e in traceResults) {
-      if (e.value.isNotEmpty) geoCache[e.key] = e.value;
-    }
-    final traceOk = traceResults.where((e) => e.value.isNotEmpty).length;
-    if (traceOk > 0) onLog?.call('cdn-cgi/trace 识别成功：$traceOk 个 IP。');
-  }
-
-  // 第三轮：剩余未识别 IP 用 ip-api.com 批量查询
-  final remainingIps = ipsToGeolocate.where((ip) => !geoCache.containsKey(ip)).toList();
-  if (remainingIps.isNotEmpty) {
-    onLog?.call('正在查询 ${remainingIps.length} 个 IP 的地区…');
-    final batchResult = geolocateIps != null
-        ? await geolocateIps(remainingIps)
-        : await geolocateIpBatch(remainingIps, proxy: proxy);
-    geoCache.addAll(batchResult);
-    final batchOk = batchResult.length;
-    onLog?.call('IP 地理查询完成：$batchOk/${remainingIps.length} 个成功。');
-    // 第三轮半：ip-api.com 失败的 IP 用 ipinfo.io 兜底
-    final failedIps = remainingIps.where((ip) => !geoCache.containsKey(ip)).toList();
-    if (failedIps.isNotEmpty) {
-      onLog?.call('正在用备用接口查询 ${failedIps.length} 个未识别 IP…');
-      final fallbackResult = geolocateIpsFallback != null
-          ? await geolocateIpsFallback(failedIps)
-          : await geolocateIpFallback(failedIps, proxy: proxy);
-      geoCache.addAll(fallbackResult);
-      onLog?.call('备用接口查询完成：${fallbackResult.length}/${failedIps.length} 个成功。');
-    }
-  }
-
-  // 第四轮：组装去重节点列表
-  // 格式：ip:port#CC source（空格分隔来源，不再用 @）
-  final nodes = <String>[];
-  final seen = <String>{};
-  for (final e in nodeEntries) {
-    // 优先用 geolocation 结果，其次用源的国家码
-    final cc = (geoCache[e.ip]?.isNotEmpty == true) ? geoCache[e.ip]! : (e.cc.isNotEmpty ? e.cc : '');
-    final ccPart = '#$cc'; // 始终带 #（域名无国家码时为 #）
-    final srcPart = e.source.isNotEmpty ? ' ${e.source}' : '';
-    final node = '${e.ip}:${e.port}$ccPart$srcPart';
-    final key = '${e.ip}:${e.port}$ccPart'; // 去重不含来源
-    if (!seen.contains(key)) {
-      seen.add(key);
-      nodes.add(node);
-    }
-  }
-
-  onLog?.call(
-      '订阅转换完成：共 ${rawNodes.length} 个节点 → 去重后 ${nodes.length} 个。');
+  onLog?.call('订阅获取完成：共 ${rawNodes.length} 个节点，输出 ${nodes.length} 个。');
   return nodes;
 }
 

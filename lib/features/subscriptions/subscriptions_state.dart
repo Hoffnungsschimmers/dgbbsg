@@ -7,110 +7,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../app/motion.dart';
+import '../../app/notification_helper.dart';
 import '../../app/providers.dart';
+import '../../core/logging/app_logger.dart';
 import '../../core/config/app_config.dart';
 import '../../core/github/github_push.dart';
 import '../../core/latency/latency_filter.dart';
 import '../../core/latency/latency_prober.dart';
 import '../../core/net/ip.dart';
 import '../../core/net/proxy.dart';
-import '../../core/net/retry.dart';
+import '../../core/net/http_fetcher.dart';
 import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
-
-/// 走 Dio 带 cfg 化超时与指数退避重试的 HTTP GET，返回 body 明文。
-///
-/// 成功响应 (status 200-299) 直接返回 `.data.toString()`；其它状态码被 Dio
-/// 默认的 `validateStatus` 判定并转换成 [dio_pkg.DioException]，由
-/// [retry] 捕获并触发下一次尝试。
-///
-/// - 三档超时 (`connectTimeout`/`sendTimeout`/`receiveTimeout`) 与 `maxRetries`
-///   由调用方从 [AppConfig] 注入；本函数只在内部做 `clamp` 防御非法值。
-/// - `sleep` 默认为 [Future.delayed]；测试可注入 mock 以跳过真实指数退避。
-/// - `maxRetries` 语义：`0` 表示不重试（只走第一次），与 [retry] 一致。
-Future<String> fetchHttpWithRetry({
-  required dio_pkg.Dio dio,
-  required String url,
-  required int connectTimeoutSec,
-  required int sendTimeoutSec,
-  required int receiveTimeoutSec,
-  required int maxRetries,
-  required int retryDelayMs,
-  Future<void> Function(Duration)? sleep,
-  void Function(String)? onLog,
-}) async {
-  Future<String> doGet() async {
-    final resp = await dio.get<String>(
-      url,
-      options: dio_pkg.Options(
-        responseType: dio_pkg.ResponseType.plain,
-        headers: const {
-          'User-Agent': edgetunnelUa,
-          'Accept': '*/*',
-        },
-        connectTimeout: Duration(seconds: connectTimeoutSec.clamp(1, 300)),
-        sendTimeout: Duration(seconds: sendTimeoutSec.clamp(1, 600)),
-        receiveTimeout: Duration(seconds: receiveTimeoutSec.clamp(1, 600)),
-      ),
-    );
-    return resp.data.toString();
-  }
-
-  final retries = maxRetries.clamp(0, 10);
-  return retry<String>(
-    doGet,
-    maxRetries: retries,
-    initialDelay: Duration(milliseconds: retryDelayMs),
-    sleep: sleep,
-    onRetry: retries > 0
-        ? (attempt, max, error, delay) {
-            onLog?.call('  ↻ 重试 $attempt/$max（${classifyFetchError(error, url)}，'
-                '${(delay.inMilliseconds / 1000).toStringAsFixed(1)}s 后重试）');
-          }
-        : null,
-  );
-}
-
-/// 把抓取异常分类为可读提示（供日志/排障）。纯函数。
-String classifyFetchError(Object e, String url) {
-  if (e is dio_pkg.DioException) {
-    final t = e.type;
-    if (t == dio_pkg.DioExceptionType.connectionTimeout ||
-        t == dio_pkg.DioExceptionType.sendTimeout) {
-      return '连接超时（源不可达或被墙）';
-    }
-    if (t == dio_pkg.DioExceptionType.receiveTimeout) {
-      return '读取超时（响应过慢）';
-    }
-    if (t == dio_pkg.DioExceptionType.badResponse) {
-      final code = e.response?.statusCode;
-      final hint = (code == 403 && url.contains('/sub'))
-          ? '（该 edgetunnel 部署可能未启用 BEST_SUB：请在 Cloudflare 变量设置 BEST_SUB=1）'
-          : '';
-      return 'HTTP ${code ?? '?'} 错误$hint';
-    }
-    if (t == dio_pkg.DioExceptionType.connectionError) {
-      return '连接失败（DNS/网络不可达）';
-    }
-    // 检查底层异常：TLS 握手失败 / 证书错误
-    final inner = e.error;
-    if (inner is HandshakeException) {
-      final msg = inner.message;
-      if (msg.contains('CERTIFICATE_VERIFY_FAILED')) {
-        return 'TLS 证书校验失败（域名与证书不匹配或证书不受信，可尝试开启「跳过 TLS 证书校验」）';
-      }
-      if (msg.contains('HANDSHAKE_FAILURE') || msg.contains('SSLV3_ALERT')) {
-        return 'TLS 握手失败（服务端不兼容当前 TLS 版本/密码套件）';
-      }
-      return 'TLS 握手异常：$msg';
-    }
-    if (inner is SocketException) {
-      return '网络连接失败：${inner.message}';
-    }
-    return '请求异常：${e.message ?? e}';
-  }
-  return '未知错误：$e';
-}
 
 /// 当前运行的动作类型。
 enum RunAction { subscription, latency }
@@ -162,13 +70,16 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   /// 取消标志：调用 [cancel] 后置 true，任务在下一个检查点退出。
   bool _cancelRequested = false;
 
+  /// 自动更新定时器。
+  Timer? _autoUpdateTimer;
+
   /// 强制停止当前运行的任务。
   void cancel() {
     _cancelRequested = true;
   }
 
-  /// Windows 系统代理地址（如 '127.0.0.1:10808'），无代理时为空。
-  static final String? _systemProxy = readWindowsSystemProxy();
+  /// 系统代理地址（如 '127.0.0.1:10808'），无代理时为空。
+  static String? get _systemProxy => readSystemProxy();
 
   /// 长生命周期安全 Dio（走系统代理、校验 TLS 证书）。
   final dio_pkg.Dio _dioSafe = GithubPush.directDio();
@@ -198,7 +109,63 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     return d;
   })();
 
-  SubscriptionsNotifier(this.ref) : super(SubscriptionsState());
+  SubscriptionsNotifier(this.ref) : super(SubscriptionsState()) {
+    // 配置加载后启动自动更新定时器（如果已启用）。
+    _initAutoUpdate();
+  }
+
+  /// 异步初始化自动更新：等待配置仓库就绪后按需启动定时器。
+  Future<void> _initAutoUpdate() async {
+    try {
+      final cfg = await _cfg();
+      if (cfg.subAutoUpdateEnabled) {
+        startAutoUpdate();
+      }
+    } catch (_) {
+      // 配置加载失败时静默忽略，不影响主流程。
+    }
+  }
+
+  /// 启动自动更新定时器。若已存在则先取消再重建。
+  Future<void> startAutoUpdate() async {
+    stopAutoUpdate();
+    final cfg = await _cfg();
+    if (!cfg.subAutoUpdateEnabled) return;
+    final minutes = cfg.subAutoUpdateIntervalMin.clamp(5, 480);
+    _autoUpdateTimer = Timer.periodic(Duration(minutes: minutes), (_) async {
+      final latestCfg = await _cfg();
+      if (!latestCfg.subAutoUpdateEnabled) {
+        stopAutoUpdate();
+        return;
+      }
+      final logger = ref.read(subLoggerProvider);
+      logger.info('自动更新触发（间隔 ${latestCfg.subAutoUpdateIntervalMin} 分钟）');
+      await runSubscription();
+      if (latestCfg.subAutoUpdateRunLatency) {
+        await runLatency();
+      }
+    });
+  }
+
+  /// 停止自动更新定时器。
+  void stopAutoUpdate() {
+    _autoUpdateTimer?.cancel();
+    _autoUpdateTimer = null;
+  }
+
+  @override
+  void dispose() {
+    stopAutoUpdate();
+    super.dispose();
+  }
+
+  /// 一键运行：先订阅转换，再延迟优选。
+  Future<void> runAll() async {
+    await runSubscription();
+    if (!_cancelRequested && !state.running) {
+      await runLatency();
+    }
+  }
 
   /// 单独：订阅IP（转换订阅器 -> addressesapi.txt）。
   Future<void> runSubscription() async {
@@ -230,9 +197,13 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         await writeSubOutput(nodes, outPath);
         await ref.read(resultProvider.notifier).loadFile(outPath);
         logger.success('订阅IP转换完成：${nodes.length} 个节点 -> $outPath');
+        NotificationHelper.taskComplete(taskName: '订阅IP转换', summary: '${nodes.length} 个节点已保存');
+        _notifyWebhook(cfg, title: '订阅IP转换完成', body: '${nodes.length} 个节点已保存 -> $outPath', isError: false);
       }
     } catch (e) {
       logger.error(e.toString());
+      NotificationHelper.taskFailed(taskName: '订阅IP转换', error: e.toString());
+      _notifyWebhook(cfg, title: '订阅IP转换失败', body: e.toString(), isError: true);
     } finally {
       state = state.copyWith(running: false, clearAction: true);
     }
@@ -263,9 +234,21 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     }
 
     try {
-      final nodes = await _readNodes(await _resolve(cfg.subOutputFile));
+      // 优先使用 Results 标签页已加载的文件；否则回退到配置的输出文件。
+      final resultState = ref.read(resultProvider);
+      final currentFile = resultState.currentFile;
+      String readPath;
+      if (currentFile != null && currentFile.isNotEmpty && File(currentFile).existsSync()) {
+        readPath = currentFile;
+        logger.info('使用当前已加载的文件：$readPath');
+      } else {
+        readPath = await _resolve(cfg.subOutputFile);
+        logger.info('使用配置的输出文件：$readPath');
+      }
+      final nodes = await _readNodes(readPath, logger: logger);
       if (nodes.isEmpty) {
-        logger.warning('未找到订阅IP文件（${cfg.subOutputFile}），请先运行「订阅IP」');
+        logger.warning('文件中未找到有效节点（$readPath）。'
+            '请确认文件格式为 ip:port#CC（每行一个），或先运行「订阅IP」生成。');
       } else {
         final latencyOut = await _resolve(cfg.subLatencyOutputFile);
         final (kept, tested, connected) = await LatencyFilter.run(
@@ -299,21 +282,42 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
           logger.info('延迟优选已取消（已完成 $tested 个探测）');
         } else {
           logger.success('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
+          NotificationHelper.taskComplete(
+            taskName: '延迟优选完成',
+            summary: '测试 $tested / 连通 $connected / 保留 ${kept.length}',
+          );
+          _notifyWebhook(cfg, title: '延迟优选完成', body: '测试 $tested / 连通 $connected / 保留 ${kept.length}', isError: false);
         }
         state = state.copyWith(lastResult: LatencySummary(tested: tested, connected: connected, kept: kept.length));
         await ref.read(resultProvider.notifier).loadFile(latencyOut);
       }
     } catch (e) {
       logger.error(e.toString());
+      _notifyWebhook(cfg, title: '延迟优选失败', body: e.toString(), isError: true);
     } finally {
       progressTimer?.cancel();
       state = state.copyWith(running: false, clearProgress: true, clearAction: true);
     }
   }
 
-  Future<AppConfig> _cfg() async {
-    final repo = await ref.read(configRepositoryProvider.future);
-    return repo.current;
+  Future<AppConfig> _cfg() => readLatestConfig(ref);
+
+  /// 发送 Webhook 通知（若已配置）。静默失败，不影响主流程。
+  Future<void> _notifyWebhook(AppConfig cfg, {required String title, required String body, required bool isError}) async {
+    if (cfg.webhookType == 'none' || cfg.webhookUrl.isEmpty) return;
+    if (isError && !cfg.webhookOnError) return;
+    if (!isError && !cfg.webhookOnComplete) return;
+    try {
+      final sender = ref.read(webhookSenderProvider);
+      await sender.send(
+        type: cfg.webhookType,
+        url: cfg.webhookUrl,
+        title: title,
+        body: body,
+      );
+    } catch (_) {
+      // 通知失败不影响主流程
+    }
   }
 
   Future<String> _resolve(String name) async {
@@ -410,18 +414,39 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     }
   }
 
-  Future<List<String>> _readNodes(String path) async {
+  Future<List<String>> _readNodes(String path, {AppLogger? logger}) async {
     final f = File(path);
-    if (!f.existsSync()) return [];
+    if (!f.existsSync()) {
+      logger?.warning('文件不存在：$path');
+      return [];
+    }
     final text = await f.readAsString();
-    return text
-        .split('\n')
+    if (text.isEmpty) {
+      logger?.warning('文件内容为空：$path');
+      return [];
+    }
+    final lines = text.split('\n')
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty && !e.startsWith('#'))
         .toList();
+    logger?.info('读取 ${lines.length} 行节点数据（$path）');
+    return lines;
   }
 
 }
 
-final subProvider = StateNotifierProvider<SubscriptionsNotifier, SubscriptionsState>(
-    (ref) => SubscriptionsNotifier(ref));
+final subProvider = StateNotifierProvider<SubscriptionsNotifier, SubscriptionsState>((ref) {
+  final notifier = SubscriptionsNotifier(ref);
+  // 监听配置变化，自动启停自动更新定时器。
+  ref.listen<AsyncValue<AppConfig>>(configProvider, (_, next) {
+    next.whenData((cfg) {
+      if (cfg.subAutoUpdateEnabled) {
+        notifier.startAutoUpdate();
+      } else {
+        notifier.stopAutoUpdate();
+      }
+    });
+  });
+  ref.onDispose(notifier.dispose);
+  return notifier;
+});

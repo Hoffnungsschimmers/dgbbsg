@@ -71,6 +71,20 @@ const _countryNameMap = <String, String>{
   'NC': '新喀里多尼亚',
 };
 
+/// 国家码/中文名 → 国旗 emoji（Regional Indicator Symbol 对）。
+/// 例：'HK' → 🇭🇰，'US' → 🇺🇸，'香港' → 🇭🇰。非 ASCII 或空返回空串。
+String countryCodeToFlag(String input) {
+  String cc = input;
+  if (input.length != 2 || input.codeUnitAt(0) > 127) {
+    cc = normalizeCountryCode(input);
+  }
+  if (cc.length != 2) return '';
+  final a = cc.codeUnitAt(0);
+  final b = cc.codeUnitAt(1);
+  if (a < 65 || a > 90 || b < 65 || b > 90) return '';
+  return String.fromCharCode(0x1F1E6 + a - 65) + String.fromCharCode(0x1F1E6 + b - 65);
+}
+
 /// 中文国家名 → ISO 国家码反向映射（懒初始化）。
 final Map<String, String> _reverseCountryMap = () {
   final map = <String, String>{};
@@ -183,11 +197,8 @@ const _cfAirportMap = <String, String>{
 /// 发送 HTTP(S) GET 请求 /cdn-cgi/trace，解析 colo=XXX 字段得到机场码。
 /// 国内直连 CF IP 时常 80 端口被封，因此先尝试 HTTP，失败后自动降级 HTTPS。
 /// 对任意 IP 都尝试（不限于已知 CF 段），非 CF IP 会连接失败返回空串。
-/// 注意：每次调用创建独立 HttpClient，因为调用场景是批量短生命周期请求
-/// （Future.wait 并发数十到数百个），无需连接池复用。
 Future<String> geolocateCfIp(String ip, {Duration? timeout, String? proxy}) async {
   final t = timeout ?? const Duration(milliseconds: 2500);
-  // 先试 HTTP，再试 HTTPS（国内 CF IP 的 80 端口常被封）
   for (final scheme in ['http', 'https']) {
     try {
       final client = HttpClient()..connectionTimeout = t;
@@ -213,6 +224,52 @@ Future<String> geolocateCfIp(String ip, {Duration? timeout, String? proxy}) asyn
   return '';
 }
 
+/// 批量通过 cdn-cgi/trace 识别多个 IP 的地区，复用单个 [HttpClient]。
+///
+/// 比逐个调用 [geolocateCfIp] 更高效：避免为每个 IP 创建/销毁 HttpClient。
+/// 返回 IP → 国家码 映射，失败的 IP 不在结果中。
+Future<Map<String, String>> geolocateCfIpBatch(
+  List<String> ips, {
+  Duration? timeout,
+  String? proxy,
+}) async {
+  if (ips.isEmpty) return {};
+  final t = timeout ?? const Duration(milliseconds: 2500);
+  final result = <String, String>{};
+
+  Future<String> traceOne(HttpClient client, String ip) async {
+    for (final scheme in ['http', 'https']) {
+      try {
+        final req = await client.getUrl(Uri.parse('$scheme://$ip/cdn-cgi/trace'));
+        req.headers.set('Host', 'www.cloudflare.com');
+        final resp = await req.close().timeout(t);
+        final body = await resp.transform(SystemEncoding().decoder).join();
+        final match = RegExp(r'colo=(\w+)').firstMatch(body);
+        if (match != null) {
+          final airport = match.group(1)!;
+          final cc = cfAirportToCountry(airport);
+          if (cc.isNotEmpty) return cc;
+        }
+      } catch (_) {}
+    }
+    return '';
+  }
+
+  final client = HttpClient()..connectionTimeout = t;
+  if (proxy != null && proxy.isNotEmpty) {
+    client.findProxy = (uri) => 'PROXY $proxy';
+  }
+  try {
+    await Future.wait(ips.map((ip) async {
+      final cc = await traceOne(client, ip);
+      if (cc.isNotEmpty) result[ip] = cc;
+    }));
+  } finally {
+    client.close(force: true);
+  }
+  return result;
+}
+
 /// 批量查询 IP 地理位置（使用 ip-api.com 免费接口，POST 批量最多100个）。
 /// 返回 IP → ISO 国家码 映射。失败的 IP 不在结果中。
 /// [proxy] 可选代理地址（如 '127.0.0.1:10808'），Windows 下需要走系统代理。
@@ -228,7 +285,7 @@ Future<Map<String, String>> geolocateIpBatch(List<String> ips, {Duration? timeou
         client.findProxy = (uri) => 'PROXY $proxy';
       }
       try {
-        final req = await client.openUrl('POST', Uri.parse('http://ip-api.com/batch'));
+        final req = await client.openUrl('POST', Uri.parse('https://ip-api.com/batch/json'));
         req.headers.set('Content-Type', 'application/json');
         req.write(jsonEncode(batch.map((ip) => {'query': ip, 'fields': 'countryCode'}).toList()));
         final resp = await req.close().timeout(t);

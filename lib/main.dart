@@ -3,15 +3,34 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app/app.dart';
 import 'app/motion.dart';
-import 'app/platform.dart';
 import 'app/providers.dart';
+import 'app/system_tray.dart';
 import 'app/theme.dart';
+import 'features/subscriptions/subscriptions_state.dart';
 import 'features/widgets/common.dart';
 
-void main() {
+/// Global instance so the app shell can access it.
+final SystemTrayManager systemTrayManager = SystemTrayManager();
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize window_manager for desktop platforms.
+  await windowManager.ensureInitialized();
+
+  const windowOptions = WindowOptions(
+    minimumSize: Size(800, 600),
+    title: 'CFNB - CF优选工具',
+  );
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
+
   runApp(const ProviderScope(child: MyApp()));
 }
 
@@ -22,7 +41,7 @@ class MyApp extends ConsumerStatefulWidget {
   ConsumerState<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends ConsumerState<MyApp> {
+class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   DateTime? _lastBackPress;
 
   @override
@@ -30,6 +49,44 @@ class _MyAppState extends ConsumerState<MyApp> {
     super.initState();
     // 初始状态栏样式
     _applySystemUI(ThemeMode.light);
+
+    // Prevent the window from actually closing; hide to tray instead.
+    windowManager.setPreventClose(true);
+    windowManager.addListener(this);
+
+    // Initialize the system tray after the first frame so context is ready.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initSystemTray());
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    systemTrayManager.dispose();
+    super.dispose();
+  }
+
+  /// Called by window_manager when the user clicks the close button.
+  @override
+  void onWindowClose() {
+    systemTrayManager.hideToTray();
+  }
+
+  Future<void> _initSystemTray() async {
+    await systemTrayManager.init(
+      onShow: () => systemTrayManager.showWindow(),
+      onRunSub: () {
+        systemTrayManager.showWindow();
+        ref.read(subProvider.notifier).runSubscription();
+      },
+      onRunLatency: () {
+        systemTrayManager.showWindow();
+        ref.read(subProvider.notifier).runLatency();
+      },
+      onQuit: () async {
+        systemTrayManager.dispose();
+        await windowManager.destroy();
+      },
+    );
   }
 
   /// 根据主题模式更新系统状态栏/导航栏样式（沉浸式 + 透明）

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/services.dart' show rootBundle;
 
@@ -81,15 +80,19 @@ class NodeParser {
   /// - 区域优先格式 `HK [延迟 xx ms]`（无 IP，跳过）
   List<String> parseTextNodes(String text) {
     final nodes = <String>[];
-    final ipRe = RegExp(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?');
-    final domainRe =
-        RegExp(r'([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})(?::(\d{1,5}))?');
+    // IPv4
+    final ipv4Re = RegExp(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?');
+    // IPv6 方括号格式: [2606:4700:52::1]:443
+    final ipv6Re = RegExp(r'\[([0-9a-fA-F:]+)\]:(\d{1,5})');
+    // 域名
+    final domainRe = RegExp(r'([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})(?::(\d{1,5}))?');
+
     for (var token in text.split('\n')) {
       token = token.trim();
       if (token.isEmpty) continue;
       if (token.startsWith('#') || token.startsWith('//')) continue;
 
-      // 拆分标签（# 之后为国家/备注）
+      // 拆分标签（# 之后为注释）
       String body = token;
       String label = '';
       if (token.contains('#')) {
@@ -99,39 +102,37 @@ class NodeParser {
       }
 
       String? ipPort;
-      final ipMatch = ipRe.firstMatch(body);
-      if (ipMatch != null) {
-        final ip = ipMatch.group(1)!;
-        final port = ipMatch.group(2);
-        ipPort = port != null ? '$ip:$port' : '$ip:443';
+
+      // 优先匹配 IPv6 方括号格式
+      final v6Match = ipv6Re.firstMatch(body);
+      if (v6Match != null) {
+        ipPort = '[${v6Match.group(1)}]:${v6Match.group(2)}';
       } else {
-        final dm = domainRe.firstMatch(body);
-        if (dm != null) {
-          final domain = dm.group(1)!;
-          final port = dm.group(2);
-          ipPort = port != null ? '$domain:$port' : '$domain:443';
+        // 匹配 IPv4
+        final ipMatch = ipv4Re.firstMatch(body);
+        if (ipMatch != null) {
+          final ip = ipMatch.group(1)!;
+          final port = ipMatch.group(2);
+          ipPort = port != null ? '$ip:$port' : '$ip:443';
+        } else {
+          // 匹配域名
+          final dm = domainRe.firstMatch(body);
+          if (dm != null) {
+            final domain = dm.group(1)!;
+            final port = dm.group(2);
+            ipPort = port != null ? '$domain:$port' : '$domain:443';
+          }
         }
       }
-      if (ipPort == null) continue; // 无 IP/域名（如纯区域注释）跳过
+      if (ipPort == null) continue;
 
-      if (RegExp(r'^\d+\.\d+\.\d+\.\d+:\d+$').hasMatch(ipPort)) {
-        final code = extractCountryCode(label.isEmpty ? body : label);
-        if (code != null) nodes.add('$ipPort#$code');
-        continue;
-      }
-
-      if (RegExp(r'^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}:\d+$').hasMatch(ipPort)) {
-        final idx = ipPort.lastIndexOf(':');
-        final domain = ipPort.substring(0, idx);
-        final port = ipPort.substring(idx + 1);
-        try {
-          final ip = InternetAddress(domain).address;
-          final code = extractCountryCode(label.isEmpty ? body : label);
-          if (code != null) nodes.add('$ip:$port#$code');
-        } on SocketException {
-          // 解析失败忽略
-        }
-        continue;
+      // 输出格式：ip:port#CC（标准化国家码）
+      if (label.isNotEmpty) {
+        final cc = extractCountryCode(label);
+        if (cc == null) continue; // 无有效国家码则跳过
+        nodes.add('$ipPort#$cc');
+      } else {
+        nodes.add(ipPort);
       }
     }
     return nodes;

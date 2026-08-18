@@ -20,11 +20,11 @@ class AppTheme {
   static const _lightWarning = Color(0xFFD97706);
 
   static const _darkBg = Color(0xFF0C0A09);
-  static const _darkSurface = Color(0xFF171412);
-  static const _darkSurfaceHover = Color(0xFF221D19);
+  static const _darkSurface = Color(0xFF1A1714);
+  static const _darkSurfaceHover = Color(0xFF262119);
   static const _darkText = Color(0xFFF5F0EA);
-  static const _darkTextDim = Color(0xFF9A9189);
-  static const _darkBorder = Color(0xFF2A241E);
+  static const _darkTextDim = Color(0xFFA39E96);
+  static const _darkBorder = Color(0xFF332D26);
   static const _darkLogFg = Color(0xFFCBD5E1);
   // 语义色 dark 下取略亮的可读版本。
   static const _darkSuccess = Color(0xFF4ADE80);
@@ -32,7 +32,6 @@ class AppTheme {
   static const _darkWarning = Color(0xFFFBBF24);
 
   /// 图表配色（6 色循环），以强调橙为主轴，其余抽取自中性/暖色系，保持设计语言。
-  /// light/dark 共用同一组（图表面积色对比主要靠 alpha 与背景区分）。
   static const List<Color> chartPalette = [
     Color(0xFFFF7A1A), // 强调橙
     Color(0xFF6B7280), // 中性灰
@@ -40,6 +39,16 @@ class AppTheme {
     Color(0xFF16A34A), // 成功绿
     Color(0xFFD97706), // 琥珀
     Color(0xFF7C3AED), // 紫
+  ];
+
+  /// 深色模式图表配色：亮度更高，确保在暗色背景上的可读性。
+  static const List<Color> chartPaletteDark = [
+    Color(0xFFFF8C3A), // 强调橙（更亮）
+    Color(0xFF9CA3AF), // 中性灰（更亮）
+    Color(0xFF38BDF8), // 冷色点缀（更亮）
+    Color(0xFF4ADE80), // 成功绿（更亮）
+    Color(0xFFFBBF24), // 琥珀（更亮）
+    Color(0xFFA78BFA), // 紫（更亮）
   ];
 
   static ThemeData light() => _build(
@@ -68,6 +77,7 @@ class AppTheme {
         danger: _darkDanger,
         warning: _darkWarning,
         brightness: Brightness.dark,
+        chartColors: chartPaletteDark,
       );
 
   static ThemeData _build({
@@ -82,7 +92,9 @@ class AppTheme {
     required Color danger,
     required Color warning,
     required Brightness brightness,
+    List<Color>? chartColors,
   }) {
+    final effectiveChartPalette = chartColors ?? chartPalette;
     final scheme = ColorScheme.fromSeed(
       seedColor: edgeOrange,
       brightness: brightness,
@@ -212,7 +224,7 @@ class AppTheme {
           success: success,
           danger: danger,
           warning: warning,
-          chartPalette: chartPalette,
+          chartPalette: effectiveChartPalette,
           radius: radius,
         ),
       ],
