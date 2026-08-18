@@ -204,11 +204,12 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
 
 /// 转换所有候选订阅器/订阅链接为标准 IP:port#CC 节点列表（去重）。
 ///
-/// 返回去重后的节点列表。[fetch] 注入真实 HTTP 拉取；
+/// 返回记录：`nodes` 去重后的节点列表，`okSources` 解析出节点的源数，
+/// `failedSources` 拉取失败或未解析出节点的源数。[fetch] 注入真实 HTTP 拉取；
 /// [resolve] 注入域名解析（返回 IP 或 null）。[parser] 用于从节点名提取国家码。
 /// [geolocateIps] 可选注入 IP 批量地理查询（测试时可 mock 为空）。
 /// [geolocateIpsFallback] 可选注入备用 IP 地理查询（测试时可 mock 为空）。
-Future<List<String>> convertSubscriptions(
+Future<({List<String> nodes, int okSources, int failedSources})> convertSubscriptions(
   AppConfig config, {
   required SubFetcher fetch,
   required Future<String?> Function(String host) resolve,
@@ -219,9 +220,13 @@ Future<List<String>> convertSubscriptions(
   void Function(String)? onLog,
 }) async {
   final tasks = collectSubscriptionTasks(config);
-  if (tasks.isEmpty) return <String>[];
+  if (tasks.isEmpty) {
+    return (nodes: <String>[], okSources: 0, failedSources: 0);
+  }
 
   final rawNodes = <({String host, int port, String name, String source})>[];
+  var okSources = 0;
+  var failedSources = 0;
 
     for (final (name, urls) in tasks) {
       onLog?.call('━━━ $name ━━━');
@@ -230,11 +235,13 @@ Future<List<String>> convertSubscriptions(
           : [await fetchFirstWorking(urls, fetch, onLog: onLog, label: name)];
 
       var got = 0;
+      var bodySucceeded = 0;
       for (final content in bodies) {
         if (content.isEmpty) continue;
         // 优先按 vless/vmess 订阅格式解析
         final parsed = SubParser.parseSubscriptionLinks(decodeSubscription(content));
         if (parsed.isNotEmpty) {
+          bodySucceeded++;
           got += parsed.length;
           for (final p in parsed) {
             rawNodes.add((host: p.host, port: p.port, name: p.name, source: name));
@@ -242,6 +249,7 @@ Future<List<String>> convertSubscriptions(
         } else {
           // 回退：按纯 IP/域名 列表解析（如 bestcf.pages.dev 的 txt 文件）
           final textNodes = parser.parseTextNodes(content);
+          if (textNodes.isNotEmpty) bodySucceeded++;
           got += textNodes.length;
           for (final node in textNodes) {
             // 已经是 ip:port#CC 格式，直接加入
@@ -252,14 +260,18 @@ Future<List<String>> convertSubscriptions(
           }
         }
       }
-      if (got > 0) {
+      if (bodySucceeded > 0) {
+        okSources++;
         onLog?.call('[+] $name 解析出 $got 个节点。');
       } else {
+        failedSources++;
         onLog?.call('[-] $name：所有 URL 均拉取失败或未解析出节点。');
       }
     }
 
-  if (rawNodes.isEmpty) return <String>[];
+  if (rawNodes.isEmpty) {
+    return (nodes: <String>[], okSources: okSources, failedSources: failedSources);
+  }
 
   final hosts = <String>{for (final r in rawNodes) r.host};
   final resolved = <String, String?>{};
@@ -289,8 +301,8 @@ Future<List<String>> convertSubscriptions(
     nodes.add(node);
   }
 
-  onLog?.call('订阅获取完成：共 ${rawNodes.length} 个节点，输出 ${nodes.length} 个。');
-  return nodes;
+  onLog?.call('订阅获取完成：成功 $okSources 个源，失败 $failedSources 个源，共 ${rawNodes.length} 个节点，输出 ${nodes.length} 个。');
+  return (nodes: nodes, okSources: okSources, failedSources: failedSources);
 }
 
 /// 将订阅转换结果写入独立文件（LF 换行，便于 git 处理）。

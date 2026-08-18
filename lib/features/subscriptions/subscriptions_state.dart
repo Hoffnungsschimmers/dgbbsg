@@ -156,7 +156,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     final logger = ref.read(subLoggerProvider);
     logger.info('开始「订阅IP」转换…');
     try {
-      final nodes = await convertSubscriptions(
+      final result = await convertSubscriptions(
         cfg,
         fetch: (url, {label = ''}) {
           if (_cancelRequested) return Future.value('');
@@ -167,11 +167,22 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         proxy: _systemProxy,
         onLog: (m) => logger.info(m),
       );
+      final nodes = result.nodes;
       if (_cancelRequested) {
         logger.info('「订阅IP」已取消');
       } else if (nodes.isEmpty) {
-        logger.warning('订阅转换无可用节点（请检查 subGenerators/subUrls 配置）');
+        if (result.failedSources > 0) {
+          final msg = '「订阅IP」转换失败：全部 ${result.failedSources} 个订阅源均拉取失败或未解析出节点';
+          logger.error(msg);
+          NotificationHelper.taskFailed(taskName: '订阅IP转换', error: msg);
+          _notifyWebhook(cfg, title: '订阅IP转换失败', body: msg, isError: true);
+        } else {
+          logger.warning('订阅转换无可用节点（请检查 subGenerators/subUrls 配置）');
+        }
       } else {
+        if (result.failedSources > 0) {
+          logger.warning('部分订阅源失败：${result.okSources} 个成功，${result.failedSources} 个失败（见上方明细）');
+        }
         final outPath = await _resolve(cfg.subOutputFile);
         await writeSubOutput(nodes, outPath);
         await ref.read(resultProvider.notifier).loadFile(outPath);

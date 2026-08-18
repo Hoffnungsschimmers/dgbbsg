@@ -95,7 +95,7 @@ void main() {
       // 让它返回订阅明文：
       Future<String> fetchWithBody(String url, {String label = ''}) async => sub;
 
-      final nodes = await convertSubscriptions(
+      final result = await convertSubscriptions(
         AppConfig(subInputMode: 'url', subUrls: const ['https://my.sub/abcd']),
         fetch: fetchWithBody,
         resolve: fakeResolve,
@@ -103,6 +103,9 @@ void main() {
         geolocateIps: (_) async => {},
         geolocateIpsFallback: (_) async => {},
       );
+      final nodes = result.nodes;
+      expect(result.okSources, 1);
+      expect(result.failedSources, 0);
       expect(nodes.length, 2);
       expect(nodes.any((n) => n.startsWith('1.1.1.1:443#US')), isTrue);
       // IDK 非真实国家码，按等价逻辑回落到默认国家 ''（无 # 后缀）
@@ -111,15 +114,52 @@ void main() {
       // 因此保留两条。仅同 ip:port#cc 才折叠为一条。
       final cfg2 = AppConfig(subInputMode: 'url', subUrls: const ['https://my.sub/abcd']);
       Future<String?> dupResolve(String host) async => '9.9.9.9';
-      final nodes2 = await convertSubscriptions(
+      final nodes2 = (await convertSubscriptions(
         cfg2,
         fetch: fetchWithBody,
         resolve: dupResolve,
         parser: parser,
         geolocateIps: (_) async => {},
         geolocateIpsFallback: (_) async => {},
-      );
+      )).nodes;
       expect(nodes2.length, 2);
+    });
+
+    test('全部源失败时统计失败源数', () async {
+      Future<String> failingFetch(String url, {String label = ''}) async => '';
+
+      final result = await convertSubscriptions(
+        AppConfig(
+          subInputMode: 'url',
+          subUrls: const ['https://a.fail/sub', 'https://b.fail/sub'],
+        ),
+        fetch: failingFetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+
+      expect(result.nodes, isEmpty);
+      expect(result.okSources, 0);
+      expect(result.failedSources, 2);
+    });
+
+    test('部分源失败时分别统计', () async {
+      Future<String> partialFetch(String url, {String label = ''}) async =>
+          url.contains('a.ok') ? 'vless://u@node1.com:443#US' : '';
+
+      final result = await convertSubscriptions(
+        AppConfig(
+          subInputMode: 'url',
+          subUrls: const ['https://a.ok/sub', 'https://b.fail/sub'],
+        ),
+        fetch: partialFetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+
+      expect(result.nodes, isNotEmpty);
+      expect(result.okSources, 1);
+      expect(result.failedSources, 1);
     });
   });
 }
