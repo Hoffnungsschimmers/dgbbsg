@@ -1,5 +1,25 @@
+import 'dart:io';
+
+import 'package:cfnb_app/app/providers.dart';
+import 'package:cfnb_app/app/theme.dart';
+import 'package:cfnb_app/core/config/app_config.dart';
+import 'package:cfnb_app/core/config/config_repository.dart';
+import 'package:cfnb_app/core/config/secure_kv.dart';
 import 'package:cfnb_app/features/results/result_state.dart';
+import 'package:cfnb_app/features/results/results_tab.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class _FakePathProvider extends PathProviderPlatform {
+  final String dir;
+  _FakePathProvider(this.dir);
+
+  @override
+  Future<String?> getApplicationDocumentsPath() async => dir;
+}
 
 void main() {
   group('parseLatency()', () {
@@ -160,6 +180,73 @@ void main() {
       notifier.addRow('1.1.1.1:443#US');
       notifier.updateRow(99, '2.2.2.2:443#JP');
       expect(notifier.state.rows, hasLength(1));
+    });
+  });
+
+  group('ResultsTab', () {
+    testWidgets('启动时自动加载配置指定的结果文件', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final repo = (await tester
+          .runAsync(() => ConfigRepository.init(secure: InMemorySecureKv())))!;
+      final dir = (await tester
+          .runAsync(() => Directory.systemTemp.createTemp('cfnb_test')))!;
+      addTearDown(() async {
+        for (var attempt = 0; attempt < 5; attempt++) {
+          try {
+            await dir.delete(recursive: true);
+            return;
+          } catch (_) {
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
+        }
+      });
+
+      PathProviderPlatform.instance = _FakePathProvider(dir.path);
+      File('${dir.path}/addressesapi.txt')
+          .writeAsStringSync('1.2.3.4:443#US mia 50.00 ms\n');
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(ProviderScope(
+          overrides: [
+            configRepositoryProvider.overrideWith((ref) => repo),
+            configProvider.overrideWith(
+              (ref) async => const AppConfig(subOutputFile: 'addressesapi.txt'),
+            ),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(body: ResultsTab()),
+          ),
+        ));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      });
+      await tester.pumpAndSettle();
+
+      final ctx = tester.element(find.byType(ResultsTab));
+      final state = ProviderScope.containerOf(ctx).read(resultProvider);
+      expect(state.currentFile, 'addressesapi.txt');
+      expect(state.rows, hasLength(1));
+      expect(state.rows[0].ipPort, '1.2.3.4:443');
+      expect(find.textContaining('1.2.3.4', findRichText: true), findsOneWidget);
+      expect(find.text('US mia'), findsOneWidget);
+    });
+
+    test('refreshFile 回退到默认文件（currentFile 为空时）', () async {
+      SharedPreferences.setMockInitialValues({});
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final dir = await Directory.systemTemp.createTemp('cfnb_test');
+      addTearDown(() => dir.delete(recursive: true));
+      File('${dir.path}/fallback.txt')
+          .writeAsStringSync('9.9.9.9:443#US fallback 10.00 ms\n');
+
+      PathProviderPlatform.instance = _FakePathProvider(dir.path);
+      final notifier = container.read(resultProvider.notifier);
+      await notifier.refreshFile('fallback.txt');
+
+      expect(notifier.state.currentFile, 'fallback.txt');
+      expect(notifier.state.rows, hasLength(1));
+      expect(notifier.state.rows[0].ipPort, '9.9.9.9:443');
     });
   });
 }

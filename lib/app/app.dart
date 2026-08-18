@@ -32,10 +32,14 @@ class AppShell extends ConsumerWidget {
     void switchTab(int i) => ref.read(tabProvider.notifier).state = i;
     void nextTab() => switchTab((ref.read(tabProvider) + 1) % 4);
     void prevTab() => switchTab((ref.read(tabProvider) - 1 + 4) % 4);
-    void refreshResults() {
-      final cfg = ref.read(configProvider).value;
-      if (cfg != null) {
-        ref.read(resultProvider.notifier).loadFile(cfg.subLatencyOutputFile);
+    Future<void> refreshResults() async {
+      // 优先同步缓存，回退到仓库（等价 readLatestConfig，但这里的 ref 是 WidgetRef）
+      var cfg = ref.read(latestConfigProvider);
+      if (cfg == null) {
+        cfg = (await ref.read(configRepositoryProvider.future)).current;
+      }
+      if (!cfg.subOutputFile.isEmpty) {
+        ref.read(resultProvider.notifier).refreshFile(cfg.subOutputFile);
       }
     }
 

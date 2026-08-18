@@ -43,10 +43,18 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
   @override
   void initState() {
     super.initState();
-    final cfg = ref.read(configProvider).value;
+    // 配置就绪后自动加载默认结果文件（configProvider 是 FutureProvider，
+    // 首次 build 时 .value 必为 null，不能在此同步读取）。
+    final cfg = ref.read(configProvider).valueOrNull;
     if (cfg != null) {
-      ref.read(resultProvider.notifier).loadFile(cfg.subOutputFile);
+      ref.read(resultProvider.notifier).refreshFile(cfg.subOutputFile);
     }
+    ref.listenManual(configProvider, (prev, next) {
+      final v = next.valueOrNull;
+      if (prev?.valueOrNull == null && v != null) {
+        ref.read(resultProvider.notifier).refreshFile(v.subOutputFile);
+      }
+    });
     ref.listenManual(resultProvider, (prev, next) {
       if (prev != null && prev.searchQuery != next.searchQuery && next.searchQuery.isEmpty && _searchCtl.text.isNotEmpty) {
         _searchCtl.clear();
@@ -211,11 +219,11 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                           tooltip: '刷新',
                           visualDensity: VisualDensity.compact,
                           onPressed: () async {
-                            if (cfg != null) {
-                              _rawView = false;
-                              setState(() {});
-                              await ref.read(resultProvider.notifier).loadFile(cfg.subOutputFile);
-                            }
+                            _rawView = false;
+                            setState(() {});
+                            await ref
+                                .read(resultProvider.notifier)
+                                .refreshFile(cfg?.subOutputFile ?? '');
                           },
                         ),
                       if (rows.isNotEmpty) ...[

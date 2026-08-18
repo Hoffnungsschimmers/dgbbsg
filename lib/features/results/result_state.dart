@@ -237,6 +237,14 @@ class ResultNotifier extends StateNotifier<ResultState> {
     );
   }
 
+  /// 刷新当前文件：重载 `state.currentFile`，未加载过时用 [fallbackFile]。
+  /// 统一「刷新按钮 / Ctrl+R / 启动加载」三条路径的目标文件语义。
+  Future<void> refreshFile(String fallbackFile) async {
+    final target = state.currentFile ?? fallbackFile;
+    if (target.isEmpty) return;
+    await loadFile(target);
+  }
+
   /// 从节点行列表加载（单步：获取数据源 / 可用性结果）。
   void loadLines(List<String> lines, [String? label]) {
     final rows = lines
