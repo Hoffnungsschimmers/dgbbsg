@@ -22,44 +22,15 @@ import '../results/result_state.dart';
 /// 当前运行的动作类型。
 enum RunAction { subscription, latency }
 
-/// 延迟优选的细粒度进度。
-class LatencyProgress {
-  final int done;
-  final int total;
-  final int connected;
-  final int eliminated;
-  const LatencyProgress({required this.done, required this.total, required this.connected, required this.eliminated});
-  double get percent => total == 0 ? 0 : done / total;
-  LatencyProgress copyWith({int? done, int? total, int? connected, int? eliminated}) =>
-      LatencyProgress(
-        done: done ?? this.done,
-        total: total ?? this.total,
-        connected: connected ?? this.connected,
-        eliminated: eliminated ?? this.eliminated,
-      );
-}
-
-/// 延迟优选完成后的结果摘要（供 RunTab 显示 3 秒后自动消失）。
-class LatencySummary {
-  final int tested;
-  final int connected;
-  final int kept;
-  const LatencySummary({required this.tested, required this.connected, required this.kept});
-}
-
-/// 订阅器状态：含运行中标记、当前动作类型、延迟优选进度。
+/// 订阅器状态：含运行中标记、当前动作类型。
 class SubscriptionsState {
   final bool running;
-  final LatencyProgress? progress;
   final RunAction? currentAction;
-  final LatencySummary? lastResult;
-  SubscriptionsState({this.running = false, this.progress, this.currentAction, this.lastResult});
-  SubscriptionsState copyWith({bool? running, LatencyProgress? progress, bool clearProgress = false, RunAction? currentAction, bool clearAction = false, LatencySummary? lastResult, bool clearResult = false}) =>
+  SubscriptionsState({this.running = false, this.currentAction});
+  SubscriptionsState copyWith({bool? running, RunAction? currentAction, bool clearAction = false}) =>
       SubscriptionsState(
         running: running ?? this.running,
-        progress: clearProgress ? null : (progress ?? this.progress),
         currentAction: clearAction ? null : (currentAction ?? this.currentAction),
-        lastResult: clearResult ? null : (lastResult ?? this.lastResult),
       );
 }
 
@@ -208,86 +179,44 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     final logger = ref.read(subLoggerProvider);
     logger.info('开始「延迟优选」');
 
-    // 进度节流：缓存最新值，每 60ms flush 一次到 state，避免高频 setState 风暴。
-    LatencyProgress? latestProgress;
-    Timer? progressTimer;
-    void scheduleFlush() {
-      progressTimer ??= Timer(Motion.throttleTick, () {
-        progressTimer = null;
-        if (latestProgress != null) {
-          state = state.copyWith(progress: latestProgress);
-        }
-        if (latestProgress != null && latestProgress!.done < latestProgress!.total) {
-          scheduleFlush();
-        }
-      });
+    // 优先使用 Results 标签页已加载的文件；否则回退到配置的输出文件。
+    final resultState = ref.read(resultProvider);
+    final currentFile = resultState.currentFile;
+    String readPath;
+    if (currentFile != null && currentFile.isNotEmpty && File(currentFile).existsSync()) {
+      readPath = currentFile;
+      logger.info('使用当前已加载的文件：$readPath');
+    } else {
+      readPath = await _resolve(cfg.subOutputFile);
+      logger.info('使用配置的输出文件：$readPath');
     }
-
-    try {
-      // 优先使用 Results 标签页已加载的文件；否则回退到配置的输出文件。
-      final resultState = ref.read(resultProvider);
-      final currentFile = resultState.currentFile;
-      String readPath;
-      if (currentFile != null && currentFile.isNotEmpty && File(currentFile).existsSync()) {
-        readPath = currentFile;
-        logger.info('使用当前已加载的文件：$readPath');
-      } else {
-        readPath = await _resolve(cfg.subOutputFile);
-        logger.info('使用配置的输出文件：$readPath');
-      }
-      final nodes = await _readNodes(readPath, logger: logger);
-      if (nodes.isEmpty) {
-        logger.warning('文件中未找到有效节点（$readPath）。'
-            '请确认文件格式为 ip:port#CC（每行一个），或先运行「订阅IP」生成。');
-      } else {
-        final latencyOut = await _resolve(cfg.subLatencyOutputFile);
-        final (kept, tested, connected) = await LatencyFilter.run(
-          nodes: nodes,
-          outputFile: latencyOut,
-          latencyMaxMs: cfg.subLatencyMaxMs,
-          timeout: Duration(milliseconds: (cfg.subLatencyTimeout * 1000).round()),
-          workers: cfg.subLatencyWorkers,
-          probes: cfg.subLatencyProbes,
-          minSuccessRate: cfg.subLatencyMinSuccessRate,
-          topN: cfg.subLatencyTopN > 0 ? cfg.subLatencyTopN : 100000,
-          probe: measureLatency,
-          onLog: (m) => logger.info(m),
-          isCancelled: () => _cancelRequested,
-          onProgress: (done, total, conn) {
-            latestProgress = LatencyProgress(
-              done: done,
-              total: total,
-              connected: conn,
-              eliminated: done - conn,
-            );
-            scheduleFlush();
-          },
-        );
-        // 最终 flush
-        progressTimer?.cancel();
-        if (latestProgress != null) {
-          state = state.copyWith(progress: latestProgress);
-        }
-        if (_cancelRequested) {
-          logger.info('延迟优选已取消（已完成 $tested 个探测）');
-        } else {
-          logger.success('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
-          NotificationHelper.taskComplete(
-            taskName: '延迟优选完成',
-            summary: '测试 $tested / 连通 $connected / 保留 ${kept.length}',
-          );
-          _notifyWebhook(cfg, title: '延迟优选完成', body: '测试 $tested / 连通 $connected / 保留 ${kept.length}', isError: false);
-        }
-        state = state.copyWith(lastResult: LatencySummary(tested: tested, connected: connected, kept: kept.length));
-        await ref.read(resultProvider.notifier).loadFile(latencyOut);
-      }
-    } catch (e) {
-      logger.error(e.toString());
-      _notifyWebhook(cfg, title: '延迟优选失败', body: e.toString(), isError: true);
-    } finally {
-      progressTimer?.cancel();
-      state = state.copyWith(running: false, clearProgress: true, clearAction: true);
+    final nodes = await _readNodes(readPath, logger: logger);
+    if (nodes.isEmpty) {
+      logger.warning('文件中未找到有效节点（$readPath）。'
+          '请确认文件格式为 ip:port#CC（每行一个），或先运行「订阅IP」生成。');
+    } else {
+      final latencyOut = await _resolve(cfg.subLatencyOutputFile);
+      final (kept, tested, connected) = await LatencyFilter.run(
+        nodes: nodes,
+        outputFile: latencyOut,
+        latencyMaxMs: cfg.subLatencyMaxMs,
+        timeout: Duration(milliseconds: (cfg.subLatencyTimeout * 1000).round()),
+        workers: cfg.subLatencyWorkers,
+        probes: cfg.subLatencyProbes,
+        minSuccessRate: cfg.subLatencyMinSuccessRate,
+        topN: cfg.subLatencyTopN > 0 ? cfg.subLatencyTopN : 100000,
+        probe: measureLatency,
+      );
+      // 最终结果
+      logger.success('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
+      NotificationHelper.taskComplete(
+        taskName: '延迟优选完成',
+        summary: '测试 $tested / 连通 $connected / 保留 ${kept.length}',
+      );
+      _notifyWebhook(cfg, title: '延迟优选完成', body: '测试 $tested / 连通 $connected / 保留 ${kept.length}', isError: false);
+      await ref.read(resultProvider.notifier).loadFile(latencyOut);
     }
+    state = state.copyWith(running: false, clearAction: true);
   }
 
   Future<AppConfig> _cfg() => readLatestConfig(ref);
