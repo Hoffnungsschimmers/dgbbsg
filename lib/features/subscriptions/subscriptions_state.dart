@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart' as dio_pkg;
-import 'package:dio/io.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -84,30 +83,10 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   /// 长生命周期安全 Dio（走系统代理、校验 TLS 证书）。
   final dio_pkg.Dio _dioSafe = GithubPush.directDio();
 
-  /// 长生命周期跳过证书校验的 Dio（自签名/过期证书源）。
+  /// 长生命周期跳过证书校验的 Dio（自签名/过期证书源，对应 subInsecure）。
   /// 注意：validateStatus 保持默认（非 2xx 抛异常），仅跳过 TLS 证书校验，
   /// 以便 HTTP 错误仍能触发 retry 机制。代理配置从 _dioSafe 复用。
-  late final dio_pkg.Dio _dioInsecure = (() {
-    final d = GithubPush.directDio();
-    // 复用 _dioSafe 的代理配置（directDio 已自动读取 Windows 系统代理）
-    final adapter = d.httpClientAdapter;
-    if (adapter is IOHttpClientAdapter) {
-      final safeAdapter = _dioSafe.httpClientAdapter;
-      if (safeAdapter is IOHttpClientAdapter && safeAdapter.createHttpClient != null) {
-        final safeFactory = safeAdapter.createHttpClient!;
-        adapter.createHttpClient = () {
-          final client = safeFactory();
-          client.badCertificateCallback = (_, _, _) => true;
-          return client;
-        };
-      } else {
-        adapter.createHttpClient = () {
-          return HttpClient()..badCertificateCallback = (_, _, _) => true;
-        };
-      }
-    }
-    return d;
-  })();
+  final dio_pkg.Dio _dioInsecure = GithubPush.directDio(insecure: true);
 
   SubscriptionsNotifier(this.ref) : super(SubscriptionsState()) {
     // 配置加载后启动自动更新定时器（如果已启用）。

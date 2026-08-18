@@ -22,22 +22,24 @@ class GithubPush {
   /// 共享直连 Dio：自动读取 Windows 系统代理（注册表），适用于订阅抓取等
   /// 需经本地代理可达源的请求。Dart 的 HttpClient 不读 Windows 注册表代理，
   /// 必须手动配置 findProxy。
-  static Dio directDio() {
+  /// [insecure] 为 true 时跳过 TLS 证书校验（对应 AppConfig.subInsecure），
+  /// 默认 false 保持证书校验，代理 MITM 场景由用户显式开启。
+  static Dio directDio({bool insecure = false}) {
     final dio = Dio(BaseOptions(
       headers: {'User-Agent': 'cfnb-app'},
       connectTimeout: const Duration(seconds: 10),
       sendTimeout: const Duration(seconds: 20),
       receiveTimeout: const Duration(seconds: 20),
     ));
-    _applySystemProxy(dio);
+    _applySystemProxy(dio, insecure: insecure);
     return dio;
   }
 
   /// 读取 Windows 系统代理并应用到 Dio 的 IO 适配器。
-  /// badCertificateCallback 设为 true：代理环境下的 TLS 连接需要跳过证书校验，
-  /// 因为中间代理（如 Clash/V2RayN）可能使用自签证书进行 MITM。
+  /// 仅当 [insecure] 为 true 时跳过证书校验（如 Clash/V2RayN 使用自签证书
+  /// 做 MITM 的代理环境）；默认保持 TLS 证书校验。
   /// GitHub API 走 DIRECT 直连（见构造函数），不受此影响。
-  static void _applySystemProxy(Dio dio) {
+  static void _applySystemProxy(Dio dio, {bool insecure = false}) {
     final proxy = readSystemProxy();
     if (proxy == null) return;
     final adapter = dio.httpClientAdapter;
@@ -45,7 +47,9 @@ class GithubPush {
       adapter.createHttpClient = () {
         final client = HttpClient();
         client.findProxy = (uri) => 'PROXY $proxy';
-        client.badCertificateCallback = (_, _, _) => true;
+        if (insecure) {
+          client.badCertificateCallback = (_, _, _) => true;
+        }
         return client;
       };
     }
