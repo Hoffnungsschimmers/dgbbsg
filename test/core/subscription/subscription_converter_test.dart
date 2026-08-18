@@ -100,8 +100,6 @@ void main() {
         fetch: fetchWithBody,
         resolve: fakeResolve,
         parser: parser,
-        geolocateIps: (_) async => {},
-        geolocateIpsFallback: (_) async => {},
       );
       final nodes = result.nodes;
       expect(result.okSources, 1);
@@ -119,8 +117,6 @@ void main() {
         fetch: fetchWithBody,
         resolve: dupResolve,
         parser: parser,
-        geolocateIps: (_) async => {},
-        geolocateIpsFallback: (_) async => {},
       )).nodes;
       expect(nodes2.length, 2);
     });

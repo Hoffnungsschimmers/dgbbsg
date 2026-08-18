@@ -207,15 +207,11 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
 /// 返回记录：`nodes` 去重后的节点列表，`okSources` 解析出节点的源数，
 /// `failedSources` 拉取失败或未解析出节点的源数。[fetch] 注入真实 HTTP 拉取；
 /// [resolve] 注入域名解析（返回 IP 或 null）。[parser] 用于从节点名提取国家码。
-/// [geolocateIps] 可选注入 IP 批量地理查询（测试时可 mock 为空）。
-/// [geolocateIpsFallback] 可选注入备用 IP 地理查询（测试时可 mock 为空）。
 Future<({List<String> nodes, int okSources, int failedSources})> convertSubscriptions(
   AppConfig config, {
   required SubFetcher fetch,
   required Future<String?> Function(String host) resolve,
   required NodeParser parser,
-  Future<Map<String, String>> Function(List<String> ips)? geolocateIps,
-  Future<Map<String, String>> Function(List<String> ips)? geolocateIpsFallback,
   String? proxy,
   void Function(String)? onLog,
 }) async {

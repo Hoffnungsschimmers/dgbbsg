@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 /// 判断 host 是否为 IP 地址（IPv4 或 IPv6，支持方括号包裹的 IPv6）。
@@ -70,38 +69,6 @@ const _countryNameMap = <String, String>{
   'MZ': '莫桑比克', 'MG': '马达加斯加', 'CM': '喀麦隆', 'CF': '中非',
   'NC': '新喀里多尼亚',
 };
-
-/// 国家码/中文名 → 国旗 emoji（Regional Indicator Symbol 对）。
-/// 例：'HK' → 🇭🇰，'US' → 🇺🇸，'香港' → 🇭🇰。非 ASCII 或空返回空串。
-String countryCodeToFlag(String input) {
-  String cc = input;
-  if (input.length != 2 || input.codeUnitAt(0) > 127) {
-    cc = normalizeCountryCode(input);
-  }
-  if (cc.length != 2) return '';
-  final a = cc.codeUnitAt(0);
-  final b = cc.codeUnitAt(1);
-  if (a < 65 || a > 90 || b < 65 || b > 90) return '';
-  return String.fromCharCode(0x1F1E6 + a - 65) + String.fromCharCode(0x1F1E6 + b - 65);
-}
-
-/// 中文国家名 → ISO 国家码反向映射（懒初始化）。
-final Map<String, String> _reverseCountryMap = () {
-  final map = <String, String>{};
-  for (final entry in _countryNameMap.entries) {
-    map[entry.value] = entry.key;
-  }
-  return map;
-}();
-
-/// 将中文国家名或国家码统一转为 2 字母国家码。
-/// 例：'香港' → 'HK'，'HK' → 'HK'，'未知' → ''。
-String normalizeCountryCode(String input) {
-  if (input.length == 2 && input.codeUnitAt(0) >= 65 && input.codeUnitAt(0) <= 90) {
-    return input; // 已经是国家码
-  }
-  return _reverseCountryMap[input] ?? '';
-}
 
 /// Cloudflare 边缘节点机场码 → ISO 3166-1 alpha-2 国家码映射。
 /// 覆盖全球主要 Cloudflare 节点。未匹配时返回空串。
@@ -193,37 +160,6 @@ const _cfAirportMap = <String, String>{
   'NOU': 'NC',
 };
 
-/// 通过 Cloudflare cdn-cgi/trace 诊断端点识别 IP 所在地区。
-/// 发送 HTTP(S) GET 请求 /cdn-cgi/trace，解析 colo=XXX 字段得到机场码。
-/// 国内直连 CF IP 时常 80 端口被封，因此先尝试 HTTP，失败后自动降级 HTTPS。
-/// 对任意 IP 都尝试（不限于已知 CF 段），非 CF IP 会连接失败返回空串。
-Future<String> geolocateCfIp(String ip, {Duration? timeout, String? proxy}) async {
-  final t = timeout ?? const Duration(milliseconds: 2500);
-  for (final scheme in ['http', 'https']) {
-    try {
-      final client = HttpClient()..connectionTimeout = t;
-      if (proxy != null && proxy.isNotEmpty) {
-        client.findProxy = (uri) => 'PROXY $proxy';
-      }
-      try {
-        final req = await client.getUrl(Uri.parse('$scheme://$ip/cdn-cgi/trace'));
-        req.headers.set('Host', 'www.cloudflare.com');
-        final resp = await req.close().timeout(t);
-        final body = await resp.transform(SystemEncoding().decoder).join();
-        final match = RegExp(r'colo=(\w+)').firstMatch(body);
-        if (match != null) {
-          final airport = match.group(1)!;
-          final cc = cfAirportToCountry(airport);
-          if (cc.isNotEmpty) return cc;
-        }
-      } finally {
-        client.close(force: true);
-      }
-    } catch (_) {}
-  }
-  return '';
-}
-
 /// 批量通过 cdn-cgi/trace 识别多个 IP 的地区，复用单个 [HttpClient]。
 ///
 /// 比逐个调用 [geolocateCfIp] 更高效：避免为每个 IP 创建/销毁 HttpClient。
@@ -266,77 +202,6 @@ Future<Map<String, String>> geolocateCfIpBatch(
     }));
   } finally {
     client.close(force: true);
-  }
-  return result;
-}
-
-/// 批量查询 IP 地理位置（使用 ip-api.com 免费接口，POST 批量最多100个）。
-/// 返回 IP → ISO 国家码 映射。失败的 IP 不在结果中。
-/// [proxy] 可选代理地址（如 '127.0.0.1:10808'），Windows 下需要走系统代理。
-Future<Map<String, String>> geolocateIpBatch(List<String> ips, {Duration? timeout, String? proxy}) async {
-  if (ips.isEmpty) return {};
-  final result = <String, String>{};
-  final t = timeout ?? const Duration(seconds: 5);
-  for (var i = 0; i < ips.length; i += 100) {
-    final batch = ips.sublist(i, i + 100 > ips.length ? ips.length : i + 100);
-    try {
-      final client = HttpClient()..connectionTimeout = t;
-      if (proxy != null && proxy.isNotEmpty) {
-        client.findProxy = (uri) => 'PROXY $proxy';
-      }
-      try {
-        final req = await client.openUrl('POST', Uri.parse('https://ip-api.com/batch/json'));
-        req.headers.set('Content-Type', 'application/json');
-        req.write(jsonEncode(batch.map((ip) => {'query': ip, 'fields': 'countryCode'}).toList()));
-        final resp = await req.close().timeout(t);
-        final body = await resp.transform(utf8.decoder).join();
-        final data = jsonDecode(body) as List;
-        for (var j = 0; j < data.length; j++) {
-          final cc = data[j]['countryCode']?.toString() ?? '';
-          if (cc.isNotEmpty && cc.length == 2) {
-            result[batch[j]] = cc.toUpperCase();
-          }
-        }
-      } finally {
-        client.close(force: true);
-      }
-    } catch (_) {
-      // 批量查询失败，跳过
-    }
-  }
-  return result;
-}
-
-/// 对 ip-api.com 失败的 IP 逐个用 ipinfo.io 兜底查询。
-/// 返回 IP → ISO 国家码 映射。
-Future<Map<String, String>> geolocateIpFallback(
-  List<String> failedIps, {
-  Duration? timeout,
-  String? proxy,
-}) async {
-  if (failedIps.isEmpty) return {};
-  final t = timeout ?? const Duration(milliseconds: 2000);
-  final result = <String, String>{};
-  for (final ip in failedIps) {
-    try {
-      final client = HttpClient()..connectionTimeout = t;
-      if (proxy != null && proxy.isNotEmpty) {
-        client.findProxy = (uri) => 'PROXY $proxy';
-      }
-      try {
-        // 正确的 ipinfo.io 查询方式：通过域名访问，在路径中传入 IP
-        final req = await client.getUrl(Uri.parse('https://ipinfo.io/$ip/json'));
-        final resp = await req.close().timeout(t);
-        final body = await resp.transform(utf8.decoder).join();
-        final data = jsonDecode(body);
-        final cc = data['country']?.toString() ?? '';
-        if (cc.isNotEmpty && cc.length == 2) {
-          result[ip] = cc.toUpperCase();
-        }
-      } finally {
-        client.close(force: true);
-      }
-    } catch (_) {}
   }
   return result;
 }
