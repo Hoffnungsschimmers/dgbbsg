@@ -1,30 +1,37 @@
 import 'package:flutter/material.dart';
 
-/// 设计语言：Edge Telemetry
-/// 单一强调色 = Cloudflare 橙 (#ff7a1a)，其余皆为中性灰阶，杜绝"背景与字体同色"。
+/// 设计语言：Signal Teal（蓝灰底 + 青绿主色 + 蓝辅色）
+/// 主色 = 科技青绿；辅色 = 信号蓝；其余皆为中性蓝灰阶。
+/// 明暗两套完整语义令牌（背景/表面/悬停/边框/日志/成功/警示/危险/信息）。
 class AppTheme {
-  static const edgeOrange = Color(0xFFFF7A1A);
-  static const edgeOrangeDark = Color(0xFFE0640A);
+  // ---- 品牌色 ----
+  static const primary = Color(0xFF0D9488); // teal-600（浅色主色）
+  static const primaryDark = Color(0xFF2DD4BF); // teal-400（深色主色）
+  static const info = Color(0xFF2563EB); // 信号蓝
+  static const infoDark = Color(0xFF60A5FA);
 
-  static const _lightBg = Color(0xFFFBFAF8);
+  // ---- 浅色 ----
+  static const _lightBg = Color(0xFFF5F7FA);
   static const _lightSurface = Color(0xFFFFFFFF);
-  static const _lightSurfaceHover = Color(0xFFF3F1EC);
-  static const _lightText = Color(0xFF1C1917);
-  static const _lightTextDim = Color(0xFF78716C);
-  static const _lightBorder = Color(0xFFE7E3DC);
-  static const _lightLogBg = Color(0xFFFCFBF9);
-  static const _lightLogFg = Color(0xFF1C1917);
+  static const _lightSurfaceHover = Color(0xFFEFF3F8);
+  static const _lightText = Color(0xFF101B2C);
+  static const _lightTextDim = Color(0xFF5C6B82);
+  static const _lightBorder = Color(0xFFDDE4EE);
+  static const _lightLogBg = Color(0xFF0B1526);
+  static const _lightLogFg = Color(0xFFB7CBE4);
 
-  static const _darkBg = Color(0xFF0C0A09);
-  static const _darkSurface = Color(0xFF171412);
-  static const _darkSurfaceHover = Color(0xFF221D19);
-  static const _darkText = Color(0xFFF5F0EA);
-  static const _darkTextDim = Color(0xFF9A9189);
-  static const _darkBorder = Color(0xFF2A241E);
-  static const _darkLogBg = Color(0xFF0C0A09);
-  static const _darkLogFg = Color(0xFFCBD5E1);
+  // ---- 深色 ----
+  static const _darkBg = Color(0xFF0A0F1A);
+  static const _darkSurface = Color(0xFF111A2B);
+  static const _darkSurfaceHover = Color(0xFF1A2538);
+  static const _darkText = Color(0xFFE7EDF6);
+  static const _darkTextDim = Color(0xFF8CA0BC);
+  static const _darkBorder = Color(0xFF26354D);
+  static const _darkLogBg = Color(0xFF060B14);
+  static const _darkLogFg = Color(0xFFA9BFD9);
 
   static ThemeData light() => _build(
+        brightness: Brightness.light,
         bg: _lightBg,
         surface: _lightSurface,
         surfaceHover: _lightSurfaceHover,
@@ -33,10 +40,18 @@ class AppTheme {
         border: _lightBorder,
         logBg: _lightLogBg,
         logFg: _lightLogFg,
-        brightness: Brightness.light,
+        primary: primary,
+        primarySoft: const Color(0xFFCCFBF1),
+        onPrimary: Colors.white,
+        info: info,
+        infoSoft: const Color(0xFFDBEAFE),
+        success: const Color(0xFF16A34A),
+        warning: const Color(0xFFD97706),
+        danger: const Color(0xFFDC2626),
       );
 
   static ThemeData dark() => _build(
+        brightness: Brightness.dark,
         bg: _darkBg,
         surface: _darkSurface,
         surfaceHover: _darkSurfaceHover,
@@ -45,10 +60,18 @@ class AppTheme {
         border: _darkBorder,
         logBg: _darkLogBg,
         logFg: _darkLogFg,
-        brightness: Brightness.dark,
+        primary: primaryDark,
+        primarySoft: const Color(0xFF134E4A),
+        onPrimary: const Color(0xFF03211D),
+        info: infoDark,
+        infoSoft: const Color(0xFF1E3A5F),
+        success: const Color(0xFF4ADE80),
+        warning: const Color(0xFFFBBF24),
+        danger: const Color(0xFFF87171),
       );
 
   static ThemeData _build({
+    required Brightness brightness,
     required Color bg,
     required Color surface,
     required Color surfaceHover,
@@ -57,21 +80,31 @@ class AppTheme {
     required Color border,
     required Color logBg,
     required Color logFg,
-    required Brightness brightness,
+    required Color primary,
+    required Color primarySoft,
+    required Color onPrimary,
+    required Color info,
+    required Color infoSoft,
+    required Color success,
+    required Color warning,
+    required Color danger,
   }) {
     final scheme = ColorScheme.fromSeed(
-      seedColor: edgeOrange,
+      seedColor: primary,
       brightness: brightness,
+      primary: primary,
+      onPrimary: onPrimary,
+      secondary: info,
+      onSecondary: Colors.white,
       surface: surface,
-      primary: edgeOrange,
-      onPrimary: Colors.white,
       onSurface: text,
+      error: danger,
     ).copyWith(
       surface: surface,
       onSurface: text,
     );
 
-    final radius = BorderRadius.circular(10);
+    final radius = BorderRadius.circular(12);
 
     return ThemeData(
       useMaterial3: true,
@@ -95,11 +128,11 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: edgeOrange,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          backgroundColor: primary,
+          foregroundColor: onPrimary,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
           shape: RoundedRectangleBorder(borderRadius: radius),
-          textStyle: const TextStyle(fontWeight: FontWeight.bold),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -114,8 +147,24 @@ class AppTheme {
         style: TextButton.styleFrom(foregroundColor: textDim),
       ),
       dividerTheme: DividerThemeData(color: border, thickness: 1),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: edgeOrange,
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: primary),
+      inputDecorationTheme: InputDecorationTheme(
+        isDense: true,
+        filled: true,
+        fillColor: bg,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: primary, width: 1.4),
+        ),
       ),
       extensions: [
         AppThemeExt(
@@ -127,6 +176,14 @@ class AppTheme {
           border: border,
           logBg: logBg,
           logFg: logFg,
+          primary: primary,
+          primarySoft: primarySoft,
+          onPrimary: onPrimary,
+          info: info,
+          infoSoft: infoSoft,
+          success: success,
+          warning: warning,
+          danger: danger,
           radius: radius,
         ),
       ],
@@ -134,7 +191,7 @@ class AppTheme {
   }
 }
 
-/// 主题语义色扩展，供自定义组件直接取色（对应旧版 C 字典）。
+/// 主题语义色扩展，供自定义组件直接取色。
 class AppThemeExt extends ThemeExtension<AppThemeExt> {
   final Color bg;
   final Color surface;
@@ -144,6 +201,14 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
   final Color border;
   final Color logBg;
   final Color logFg;
+  final Color primary;
+  final Color primarySoft;
+  final Color onPrimary;
+  final Color info;
+  final Color infoSoft;
+  final Color success;
+  final Color warning;
+  final Color danger;
   final BorderRadius radius;
 
   const AppThemeExt({
@@ -155,11 +220,26 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     required this.border,
     required this.logBg,
     required this.logFg,
+    required this.primary,
+    required this.primarySoft,
+    required this.onPrimary,
+    required this.info,
+    required this.infoSoft,
+    required this.success,
+    required this.warning,
+    required this.danger,
     required this.radius,
   });
 
   static AppThemeExt of(BuildContext context) =>
       Theme.of(context).extension<AppThemeExt>()!;
+
+  /// 主色渐变（青绿 → 信号蓝），用于 Hero 卡/品牌元素。
+  LinearGradient primaryGradient() => LinearGradient(
+        colors: [primary, info],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
 
   @override
   AppThemeExt copyWith({
@@ -171,6 +251,14 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     Color? border,
     Color? logBg,
     Color? logFg,
+    Color? primary,
+    Color? primarySoft,
+    Color? onPrimary,
+    Color? info,
+    Color? infoSoft,
+    Color? success,
+    Color? warning,
+    Color? danger,
     BorderRadius? radius,
   }) =>
       AppThemeExt(
@@ -182,6 +270,14 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
         border: border ?? this.border,
         logBg: logBg ?? this.logBg,
         logFg: logFg ?? this.logFg,
+        primary: primary ?? this.primary,
+        primarySoft: primarySoft ?? this.primarySoft,
+        onPrimary: onPrimary ?? this.onPrimary,
+        info: info ?? this.info,
+        infoSoft: infoSoft ?? this.infoSoft,
+        success: success ?? this.success,
+        warning: warning ?? this.warning,
+        danger: danger ?? this.danger,
         radius: radius ?? this.radius,
       );
 

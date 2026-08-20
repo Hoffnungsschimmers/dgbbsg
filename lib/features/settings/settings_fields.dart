@@ -23,6 +23,11 @@ const List<SettingField> settingsFields = [
   SettingField('1. 订阅转换', '输出文件', 'SUB_OUTPUT_FILE', 'string'),
   SettingField('1. 订阅转换', '默认国家', 'SUB_DEFAULT_COUNTRY', 'string'),
   SettingField('1. 订阅转换', '域名解析IP', 'SUB_RESOLVE_DOMAIN', 'bool'),
+  SettingField('1. 订阅转换', '抓取超时(秒)', 'SUB_FETCH_TIMEOUT', 'int', [1, 60, 1]),
+  SettingField('1. 订阅转换', '连接超时(秒)', 'SUB_FETCH_CONNECT_TIMEOUT', 'int', [1, 30, 1]),
+  SettingField('1. 订阅转换', '失败重试次数', 'SUB_FETCH_MAX_RETRIES', 'int', [0, 10, 1]),
+  SettingField('1. 订阅转换', '重试间隔(秒)', 'SUB_FETCH_RETRY_DELAY', 'int', [0, 60, 1]),
+  SettingField('1. 订阅转换', '域名解析并发', 'SUB_RESOLVE_WORKERS', 'int', [1, 256, 1]),
 
   // 2. 延迟优选
   SettingField('2. 延迟优选', '延迟低于(ms)', 'SUB_LATENCY_MAX_MS', 'int', [10, 1000, 1]),
@@ -40,8 +45,11 @@ const List<SettingField> settingsFields = [
   SettingField('3. 带宽测速', '超时(秒)', 'SUB_SPEED_TIMEOUT', 'float', [1, 60, 1]),
   SettingField('3. 带宽测速', '并发', 'SUB_SPEED_WORKERS', 'int', [1, 100, 1]),
   SettingField('3. 带宽测速', '下载(MB)', 'SUB_SPEED_SIZE_MB', 'float', [0.1, 10, 0.1]),
+  SettingField('3. 带宽测速', '每节点测速次数', 'SUB_SPEED_PROBES', 'int', [1, 5, 1]),
+  SettingField('3. 带宽测速', '带宽参考值(Mbps)', 'SUB_BANDWIDTH_REF_MBPS', 'float', [5, 100, 1]),
 
   // 4. GitHub 推送
+  SettingField('4. GitHub 推送', 'Token', 'GITHUB_TOKEN', 'string'),
   SettingField('4. GitHub 推送', '仓库', 'GITHUB_REPO', 'string'),
   SettingField('4. GitHub 推送', '分支', 'GITHUB_BRANCH', 'string'),
 
