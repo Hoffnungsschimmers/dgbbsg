@@ -19,6 +19,36 @@ bool isIpv6(String host) {
   return RegExp(r'^[0-9a-fA-F:]+$').hasMatch(h) && h.contains(':');
 }
 
+/// 确保节点字符串（`ip:port#注释`）中的 IPv6 主机部分带上方括号（幂等）。
+/// 例：`2606:4700:8394:...:b7da:443#US` → `[2606:4700:8394:...:b7da]:443#US`
+///     `2001:db8::1` → `[2001:db8::1]`
+///     `1.2.3.4:443#US` / `example.com:443#US` / `[2606:...]:443` → 不变
+String bracketIpv6Host(String endpoint) {
+  final hashIdx = endpoint.indexOf('#');
+  final base = (hashIdx < 0 ? endpoint : endpoint.substring(0, hashIdx)).trim();
+  if (base.isEmpty || base.startsWith('[')) return endpoint;
+  final annotation = hashIdx < 0 ? '' : endpoint.substring(hashIdx);
+
+  final idx = base.lastIndexOf(':');
+  if (idx < 0) {
+    // 无端口：整个 base 就是 IP
+    return isIpv6(base) ? '[$base]$annotation' : endpoint;
+  }
+  final ip = base.substring(0, idx);
+  final port = base.substring(idx + 1);
+
+  if (ip.endsWith(':')) {
+    // 形如 2001:db8::1 —— 最后一段属于地址本体（无端口）
+    return isIpv6(base) ? '[$base]$annotation' : endpoint;
+  }
+  // 裸 IPv6:port（至少 3 段，或含 ::）
+  if (ip.contains(':') && (ip.contains('::') || ip.split(':').length >= 3)) {
+    if (port.isEmpty) return '[$ip]$annotation';
+    if (int.tryParse(port) != null) return '[$ip]:$port$annotation';
+  }
+  return endpoint;
+}
+
 /// 判断 IPv4 地址是否属于 Cloudflare Anycast 段。
 /// 已知 CF 段：104.16.0.0/12, 162.158.0.0/15, 172.64.0.0/13,
 ///   108.162.192.0/18, 13.32.0.0/13, 13.35.0.0/16, 13.224.0.0/13, 13.249.0.0/16
@@ -174,9 +204,11 @@ Future<Map<String, String>> geolocateCfIpBatch(
   final result = <String, String>{};
 
   Future<String> traceOne(HttpClient client, String ip) async {
+    // IPv6 在 URL 中必须带方括号
+    final host = isIpv6(ip) ? '[$ip]' : ip;
     for (final scheme in ['http', 'https']) {
       try {
-        final req = await client.getUrl(Uri.parse('$scheme://$ip/cdn-cgi/trace'));
+        final req = await client.getUrl(Uri.parse('$scheme://$host/cdn-cgi/trace'));
         req.headers.set('Host', 'www.cloudflare.com');
         final resp = await req.close().timeout(t);
         final body = await resp.transform(SystemEncoding().decoder).join();

@@ -17,4 +17,22 @@ void main() {
     expect(r.latency, '50.00 ms');
     expect(r.country, '美国');
   });
+
+  test('parseResultLines 裸 IPv6 自动加方括号', () {
+    final rows =
+        parseResultLines('2606:4700:8394:b884:22e2:7cb7:25bd:b7da:443#US 50.00 ms');
+    expect(
+      rows.single.node,
+      '[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#US',
+    );
+  });
+
+  test('addRow 裸 IPv6 自动加方括号', () {
+    final n = ResultNotifier();
+    n.addRow('2606:4700:8394:b884:22e2:7cb7:25bd:b7da:443#US');
+    expect(
+      n.state.rows.single.node,
+      '[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#US',
+    );
+  });
 }

@@ -98,6 +98,13 @@ void main() {
       expect(yaml, contains('password: placeholder'));
     });
 
+    test('IPv6 server 字段带方括号', () {
+      final rows = [ResultRow('2001:db8::1:443#US CM', '50.00 ms')];
+      final yaml = ResultExporter.toClashYaml(rows);
+      expect(yaml, contains('server: [2001:db8::1]'));
+      expect(yaml, contains('name: "[2001:db8::1]:443 US"'));
+    });
+
     test('空列表只输出 proxies:', () {
       final yaml = ResultExporter.toClashYaml([]);
       expect(yaml, 'proxies:');

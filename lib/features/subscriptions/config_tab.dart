@@ -16,15 +16,28 @@ class ConfigTab extends ConsumerStatefulWidget {
 }
 
 class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveClientMixin {
-  final _genCtl = <TextEditingController>[];
-  final _urlCtl = <TextEditingController>[];
   final _hostCtl = TextEditingController();
+  final _hostFocus = FocusNode();
   final _uuidCtl = TextEditingController();
+  final _uuidFocus = FocusNode();
   final _countryCtl = TextEditingController();
+  final _countryFocus = FocusNode();
   final _latencyOutCtl = TextEditingController();
+  final _latencyOutFocus = FocusNode();
   final _tokenCtl = TextEditingController();
+  final _tokenFocus = FocusNode();
   final _repoCtl = TextEditingController();
+  final _repoFocus = FocusNode();
   final _branchCtl = TextEditingController();
+  final _branchFocus = FocusNode();
+  final _wdUrlCtl = TextEditingController();
+  final _wdUrlFocus = FocusNode();
+  final _wdUserCtl = TextEditingController();
+  final _wdUserFocus = FocusNode();
+  final _wdPassCtl = TextEditingController();
+  final _wdPassFocus = FocusNode();
+  final _wdIntervalCtl = TextEditingController();
+  final _wdIntervalFocus = FocusNode();
 
   Timer? _saveTimer;
   AppConfig? _pendingCfg;
@@ -47,42 +60,57 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
 
   @override
   void dispose() {
-    for (final c in _genCtl) { c.dispose(); }
-    for (final c in _urlCtl) { c.dispose(); }
     _hostCtl.dispose();
+    _hostFocus.dispose();
     _uuidCtl.dispose();
+    _uuidFocus.dispose();
     _countryCtl.dispose();
+    _countryFocus.dispose();
     _latencyOutCtl.dispose();
+    _latencyOutFocus.dispose();
     _tokenCtl.dispose();
+    _tokenFocus.dispose();
     _repoCtl.dispose();
+    _repoFocus.dispose();
     _branchCtl.dispose();
+    _branchFocus.dispose();
+    _wdUrlCtl.dispose();
+    _wdUrlFocus.dispose();
+    _wdUserCtl.dispose();
+    _wdUserFocus.dispose();
+    _wdPassCtl.dispose();
+    _wdPassFocus.dispose();
+    _wdIntervalCtl.dispose();
+    _wdIntervalFocus.dispose();
     _saveTimer?.cancel();
     super.dispose();
   }
 
-  void _syncIf(TextEditingController ctl, String v) {
-    if (ctl.text != v) ctl.text = v;
-  }
-
-  void _syncList(List<TextEditingController> ctl, List<String> values) {
-    while (ctl.length < values.length) { ctl.add(TextEditingController()); }
-    while (ctl.length > values.length) { ctl.removeLast().dispose(); }
-    for (var i = 0; i < values.length; i++) {
-      if (ctl[i].text != values[i]) ctl[i].text = values[i];
+  /// 同步单个字段。正在编辑（聚焦）时跳过，避免覆盖用户输入并破坏选区。
+  /// 回写时给出合法选区（text= setter 会产生 offset:-1 的非法选区，
+  /// Windows 平台会把非法选区修复成「全选」）。
+  void _syncIf(TextEditingController ctl, FocusNode focus, String v) {
+    if (ctl.text != v && !focus.hasFocus) {
+      ctl.value = TextEditingValue(
+        text: v,
+        selection: TextSelection.collapsed(offset: v.length),
+      );
     }
   }
 
   void _syncControllers(AppConfig cfg) {
     _isSyncing = true;
-    _syncList(_genCtl, cfg.subGenerators);
-    _syncList(_urlCtl, cfg.subUrls);
-    _syncIf(_hostCtl, cfg.subNodeHost);
-    _syncIf(_uuidCtl, cfg.subNodeUuid);
-    _syncIf(_countryCtl, cfg.subDefaultCountry);
-    _syncIf(_tokenCtl, cfg.githubToken);
-    _syncIf(_repoCtl, cfg.githubRepo);
-    _syncIf(_branchCtl, cfg.githubBranch);
-    _syncIf(_latencyOutCtl, cfg.subLatencyOutputFile);
+    _syncIf(_hostCtl, _hostFocus, cfg.subNodeHost);
+    _syncIf(_uuidCtl, _uuidFocus, cfg.subNodeUuid);
+    _syncIf(_countryCtl, _countryFocus, cfg.subDefaultCountry);
+    _syncIf(_tokenCtl, _tokenFocus, cfg.githubToken);
+    _syncIf(_repoCtl, _repoFocus, cfg.githubRepo);
+    _syncIf(_branchCtl, _branchFocus, cfg.githubBranch);
+    _syncIf(_wdUrlCtl, _wdUrlFocus, cfg.webdavUrl);
+    _syncIf(_wdUserCtl, _wdUserFocus, cfg.webdavUser);
+    _syncIf(_wdPassCtl, _wdPassFocus, cfg.webdavPassword);
+    _syncIf(_wdIntervalCtl, _wdIntervalFocus, cfg.webdavAutoSyncIntervalMin.toString());
+    _syncIf(_latencyOutCtl, _latencyOutFocus, cfg.subLatencyOutputFile);
     _isSyncing = false;
   }
 
@@ -122,9 +150,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (e, _) => Center(child: Text('加载失败: $e')),
       data: (cfg) {
-        if (_genCtl.isEmpty && cfg.subGenerators.isNotEmpty) {
-          _syncControllers(cfg);
-        }
         final validationErrors = cfg.validate();
         return Column(
           children: [
@@ -157,6 +182,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                     _buildFetchSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildGitHubSection(context, cfg),
+                    _buildWebDavSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildAppearanceSection(context, cfg),
                   ],
@@ -174,6 +200,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   // ═══════════════════════════════════════════════════════
 
   Widget _buildSubscriptionInput(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
     return SectionCollapsible(
       title: '订阅输入',
       icon: Icons.rss_feed,
@@ -181,14 +208,24 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 输入模式
-          SegmentedButton<String>(
-            selected: {cfg.subInputMode},
-            onSelectionChanged: (s) => _save(cfg.copyWith(subInputMode: s.first)),
-            segments: const [
-              ButtonSegment(value: 'node', label: Text('订阅器')),
-              ButtonSegment(value: 'url', label: Text('订阅链接')),
-              ButtonSegment(value: 'both', label: Text('两者')),
+          // 输入模式（手机端可换行，点击区域大）
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (value, label) in const [
+                ('node', '订阅器'),
+                ('url', '订阅链接'),
+                ('both', '两者'),
+              ])
+                ChoiceChip(
+                  label: Text(label, style: const TextStyle(fontSize: 14)),
+                  selected: cfg.subInputMode == value,
+                  showCheckmark: false,
+                  selectedColor: AppTheme.edgeOrange.withValues(alpha: 0.2),
+                  side: BorderSide(color: t.border),
+                  onSelected: (_) => _save(cfg.copyWith(subInputMode: value)),
+                ),
             ],
           ),
           const SizedBox(height: 16),
@@ -224,7 +261,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
         // 标题栏 + 批量操作
         Row(
           children: [
-            Icon(Icons.dns, size: 16, color: AppTheme.edgeOrange),
+            const Icon(Icons.dns, size: 16, color: AppTheme.edgeOrange),
             const SizedBox(width: 6),
             Text('订阅器', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.text)),
             const Spacer(),
@@ -252,16 +289,26 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
 
         // 列表
         for (var i = 0; i < cfg.subGenerators.length; i++)
-          _buildListItem(
+          _buildItemCard(
             context,
-            index: i,
-            controller: _genCtl[i],
+            note: _genName(cfg.subGenerators[i]),
+            value: _genHost(cfg.subGenerators[i]),
             isEnabled: !disabled.contains(_genName(cfg.subGenerators[i])),
-            onChanged: (v) {
-              final list = [...cfg.subGenerators];
-              list[i] = v;
-              _save(cfg.copyWith(subGenerators: list));
-            },
+            onTapEdit: () => _showItemEditor(
+              title: '编辑订阅器',
+              noteLabel: '备注',
+              valueLabel: '域名',
+              showSecret: true,
+              secretLabel: '密钥（可选）',
+              note: _genName(cfg.subGenerators[i]),
+              value: _genHost(cfg.subGenerators[i]),
+              secret: _genSecret(cfg.subGenerators[i]),
+              onSave: (note, value, secret) {
+                final list = [...cfg.subGenerators];
+                list[i] = secret.isNotEmpty ? '$note|$value|$secret' : '$note|$value';
+                _save(cfg.copyWith(subGenerators: list));
+              },
+            ),
             onToggle: () {
               final name = _genName(cfg.subGenerators[i]);
               final set = {...disabled};
@@ -281,7 +328,18 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.add, size: 18),
               label: const Text('添加', style: TextStyle(fontSize: 13)),
-              onPressed: () => _save(cfg.copyWith(subGenerators: [...cfg.subGenerators, '名称|域名'])),
+              onPressed: () => _showItemEditor(
+                title: '添加订阅器',
+                noteLabel: '备注',
+                valueLabel: '域名',
+                showSecret: true,
+                secretLabel: '密钥（可选）',
+                onSave: (note, value, secret) {
+                  final entry =
+                      secret.isNotEmpty ? '$note|$value|$secret' : '$note|$value';
+                  _save(cfg.copyWith(subGenerators: [...cfg.subGenerators, entry]));
+                },
+              ),
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
@@ -315,7 +373,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       children: [
         Row(
           children: [
-            Icon(Icons.link, size: 16, color: AppTheme.edgeOrange),
+            const Icon(Icons.link, size: 16, color: AppTheme.edgeOrange),
             const SizedBox(width: 6),
             Text('订阅链接', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.text)),
             const Spacer(),
@@ -341,16 +399,23 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
         const SizedBox(height: 8),
 
         for (var i = 0; i < cfg.subUrls.length; i++)
-          _buildListItem(
+          _buildItemCard(
             context,
-            index: i,
-            controller: _urlCtl[i],
+            note: _urlNote(cfg.subUrls[i]),
+            value: _urlValue(cfg.subUrls[i]),
             isEnabled: !disabled.contains(cfg.subUrls[i].trim()),
-            onChanged: (v) {
-              final list = [...cfg.subUrls];
-              list[i] = v;
-              _save(cfg.copyWith(subUrls: list));
-            },
+            onTapEdit: () => _showItemEditor(
+              title: '编辑订阅链接',
+              noteLabel: '备注',
+              valueLabel: '链接',
+              note: _urlNote(cfg.subUrls[i]),
+              value: _urlValue(cfg.subUrls[i]),
+              onSave: (note, value, _) {
+                final list = [...cfg.subUrls];
+                list[i] = _joinNoteValue(note, value);
+                _save(cfg.copyWith(subUrls: list));
+              },
+            ),
             onToggle: () {
               final url = cfg.subUrls[i].trim();
               final set = {...disabled};
@@ -369,7 +434,14 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.add, size: 18),
               label: const Text('添加', style: TextStyle(fontSize: 13)),
-              onPressed: () => _save(cfg.copyWith(subUrls: [...cfg.subUrls, ''])),
+              onPressed: () => _showItemEditor(
+                title: '添加订阅链接',
+                noteLabel: '备注',
+                valueLabel: '链接',
+                onSave: (note, value, _) {
+                  _save(cfg.copyWith(subUrls: [...cfg.subUrls, _joinNoteValue(note, value)]));
+                },
+              ),
             ),
             const SizedBox(width: 8),
             OutlinedButton.icon(
@@ -391,72 +463,242 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
-  /// 通用列表项：紧凑卡片 + 内联开关 + 删除
-  Widget _buildListItem(
+  /// 列表项：静态卡片（备注 + 内容），点击整卡弹出编辑对话框。
+  /// 开关与删除保持行内大点击区域，编辑通过弹窗完成（避免行内小框难输入）。
+  Widget _buildItemCard(
     BuildContext context, {
-    required int index,
-    required TextEditingController controller,
+    required String note,
+    required String value,
     required bool isEnabled,
-    required ValueChanged<String> onChanged,
+    required VoidCallback onTapEdit,
     required VoidCallback onToggle,
     required VoidCallback onDelete,
   }) {
     final t = AppThemeExt.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Container(
-        decoration: BoxDecoration(
-          color: isEnabled ? t.surface : t.surfaceHover.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isEnabled ? t.border : t.border.withValues(alpha: 0.5),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onTapEdit,
+          child: Ink(
+            decoration: BoxDecoration(
+              color: isEnabled ? t.surface : t.surfaceHover.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isEnabled ? t.border : t.border.withValues(alpha: 0.5),
+              ),
+            ),
+            child: Row(
+              children: [
+                // 内联开关（点击区域大，方便快速切换）
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: onToggle,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                    child: Icon(
+                      isEnabled ? Icons.toggle_on : Icons.toggle_off,
+                      color: isEnabled ? AppTheme.edgeOrange : t.textDim,
+                      size: 30,
+                    ),
+                  ),
+                ),
+                // 备注 + 内容（静态显示，点击弹窗编辑）
+                Expanded(
+                  child: InkWell(
+                    onTap: onTapEdit,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            note.isEmpty ? '（未命名）' : note,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isEnabled ? t.text : t.textDim,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            value,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontFamily: 'AppMono',
+                              fontSize: 12,
+                              color: isEnabled ? t.textDim : t.textDim.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                // 删除按钮
+                IconButton(
+                  icon: Icon(Icons.close, size: 18, color: t.textDim),
+                  tooltip: '删除',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: onDelete,
+                ),
+              ],
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            // 内联开关（点击区域大，方便快速切换）
-            InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: onToggle,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                child: Icon(
-                  isEnabled ? Icons.toggle_on : Icons.toggle_off,
-                  color: isEnabled ? AppTheme.edgeOrange : t.textDim,
-                  size: 28,
-                ),
-              ),
-            ),
-            // 输入框
-            Expanded(
-              child: TextField(
-                controller: controller,
-                onChanged: onChanged,
-                style: TextStyle(
-                  fontFamily: 'AppMono',
-                  fontSize: 13,
-                  color: isEnabled ? t.text : t.textDim,
-                ),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                  hintText: '输入内容…',
-                  hintStyle: TextStyle(color: t.textDim, fontSize: 13),
-                ),
-              ),
-            ),
-            // 删除按钮
-            IconButton(
-              icon: Icon(Icons.close, size: 16, color: t.textDim),
-              tooltip: '删除',
-              visualDensity: VisualDensity.compact,
-              onPressed: onDelete,
-            ),
-          ],
         ),
       ),
     );
+  }
+
+  /// 编辑/新增条目弹窗：备注 + 内容（订阅器另有密钥）双框全宽输入。
+  void _showItemEditor({
+    required String title,
+    required String noteLabel,
+    required String valueLabel,
+    required void Function(String note, String value, String secret) onSave,
+    String? note,
+    String? value,
+    String? secret,
+    bool showSecret = false,
+    String? secretLabel,
+  }) {
+    final noteCtl = TextEditingController(text: note ?? '');
+    final valueCtl = TextEditingController(text: value ?? '');
+    final secretCtl = TextEditingController(text: secret ?? '');
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        final t = AppThemeExt.of(ctx);
+        return AlertDialog(
+          title: Text(title, style: const TextStyle(fontSize: 17)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(noteLabel,
+                    style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 4),
+                TextField(
+                  key: const Key('editor_note'),
+                  controller: noteCtl,
+                  autofocus: true,
+                  style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: '备注（显示在列表中的名称）',
+                    hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(valueLabel,
+                    style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 4),
+                TextField(
+                  key: const Key('editor_value'),
+                  controller: valueCtl,
+                  keyboardType: TextInputType.url,
+                  style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: valueLabel == '链接' ? 'https://…' : '域名',
+                    hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                ),
+                if (showSecret) ...[
+                  const SizedBox(height: 12),
+                  Text(secretLabel ?? '密钥（可选）',
+                      style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    key: const Key('editor_secret'),
+                    controller: secretCtl,
+                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'edgetunnel 部署 uuid 或 token',
+                      hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: () {
+                final n = noteCtl.text.trim();
+                final v = valueCtl.text.trim();
+                final s = secretCtl.text.trim();
+                if (v.isEmpty) {
+                  AppToast.show(ctx, '$valueLabel 不能为空', success: false);
+                  return;
+                }
+                onSave(n.isEmpty ? v : n, v, s);
+                Navigator.pop(ctx);
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 订阅器：名称 = 第一个 | 段
+  String _genName(String entry) => entry.split('|').first.trim();
+
+  /// 订阅器：域名 = 第二个 | 段（无则整个条目）
+  String _genHost(String entry) {
+    final parts = entry.split('|');
+    return parts.length > 1 ? parts[1].trim() : entry.trim();
+  }
+
+  /// 订阅器：密钥 = 第三个 | 段
+  String _genSecret(String entry) {
+    final parts = entry.split('|');
+    return parts.length > 2 ? parts.sublist(2).join('|').trim() : '';
+  }
+
+  /// 订阅链接：备注 = 第一个 | 段（vless/vmess 链接不带备注）
+  String _urlNote(String url) {
+    final u = url.trim();
+    if (u.startsWith('vless://') || u.startsWith('vmess://')) return '';
+    final pipeIdx = u.indexOf('|');
+    if (pipeIdx > 0) return u.substring(0, pipeIdx).trim();
+    return '';
+  }
+
+  /// 订阅链接：实际链接 = | 之后部分（无 | 则整体）
+  String _urlValue(String url) {
+    final u = url.trim();
+    if (u.startsWith('vless://') || u.startsWith('vmess://')) return u;
+    final pipeIdx = u.indexOf('|');
+    if (pipeIdx > 0) {
+      final after = u.substring(pipeIdx + 1).trim();
+      if (after.isNotEmpty) return after;
+    }
+    return u;
+  }
+
+  /// 备注 + 链接 拼回存储格式（vless/vmess 不拼备注）
+  String _joinNoteValue(String note, String value) {
+    final v = value.trim();
+    if (v.startsWith('vless://') || v.startsWith('vmess://')) return v;
+    final n = note.trim();
+    return n.isEmpty ? v : '$n|$v';
   }
 
   /// 批量操作小标签按钮
@@ -477,9 +719,10 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
-  /// 节点参数：2 列网格布局，更紧凑
+  /// 节点参数：宽屏 2 列网格，窄屏（手机）单列全宽。
   Widget _buildNodeParams(BuildContext context, AppConfig cfg) {
     final t = AppThemeExt.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= 600;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -491,50 +734,87 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
           ],
         ),
         const SizedBox(height: 10),
-        // 2 列布局
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _compactTextField(
-                label: 'Host',
-                controller: _hostCtl,
-                onChanged: (v) => _save(cfg.copyWith(subNodeHost: v)),
+        // 宽屏 2 列 / 窄屏单列
+        if (wide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _compactTextField(
+                  label: 'Host',
+                  controller: _hostCtl,
+                  focusNode: _hostFocus,
+                  onChanged: (v) => _save(cfg.copyWith(subNodeHost: v)),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _compactTextField(
-                label: 'UUID',
-                controller: _uuidCtl,
-                onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _compactTextField(
+                  label: 'UUID',
+                  controller: _uuidCtl,
+                  focusNode: _uuidFocus,
+                  onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v)),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _compactTextField(
-                label: '默认国家码',
-                controller: _countryCtl,
-                onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.toUpperCase())),
-                hint: '留空=不设',
+            ],
+          )
+        else ...[
+          _compactTextField(
+            label: 'Host',
+            controller: _hostCtl,
+            focusNode: _hostFocus,
+            onChanged: (v) => _save(cfg.copyWith(subNodeHost: v)),
+          ),
+          const SizedBox(height: 12),
+          _compactTextField(
+            label: 'UUID',
+            controller: _uuidCtl,
+            focusNode: _uuidFocus,
+            onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v)),
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (wide)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _compactTextField(
+                  label: '默认国家码',
+                  controller: _countryCtl,
+                  focusNode: _countryFocus,
+                  onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.toUpperCase())),
+                  hint: '留空=不设',
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _compactTextField(
-                label: '输出文件名',
-                controller: _latencyOutCtl,
-                onChanged: (v) => _save(cfg.copyWith(subLatencyOutputFile: v)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _compactTextField(
+                  label: '输出文件名',
+                  controller: _latencyOutCtl,
+                  focusNode: _latencyOutFocus,
+                  onChanged: (v) => _save(cfg.copyWith(subLatencyOutputFile: v)),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
+            ],
+          )
+        else ...[
+          _compactTextField(
+            label: '默认国家码',
+            controller: _countryCtl,
+            focusNode: _countryFocus,
+            onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.toUpperCase())),
+            hint: '留空=不设',
+          ),
+          const SizedBox(height: 12),
+          _compactTextField(
+            label: '输出文件名',
+            controller: _latencyOutCtl,
+            focusNode: _latencyOutFocus,
+            onChanged: (v) => _save(cfg.copyWith(subLatencyOutputFile: v)),
+          ),
+        ],
+        const SizedBox(height: 12),
         // 解析域名开关
         Container(
           decoration: BoxDecoration(
@@ -542,14 +822,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: t.border),
           ),
-          child: SwitchListTile(
-            title: Text('解析域名为 IP', style: TextStyle(fontSize: 13, color: t.text)),
-            subtitle: Text('关闭则保留域名原样', style: TextStyle(fontSize: 12, color: t.textDim)),
-            value: cfg.subResolveDomain,
-            onChanged: (v) => _save(cfg.copyWith(subResolveDomain: v)),
-            activeThumbColor: AppTheme.edgeOrange,
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              title: Text('解析域名为 IP', style: TextStyle(fontSize: 13, color: t.text)),
+              subtitle: Text('关闭则保留域名原样', style: TextStyle(fontSize: 12, color: t.textDim)),
+              value: cfg.subResolveDomain,
+              onChanged: (v) => _save(cfg.copyWith(subResolveDomain: v)),
+              activeThumbColor: AppTheme.edgeOrange,
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
           ),
         ),
       ],
@@ -560,6 +843,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   Widget _compactTextField({
     required String label,
     required TextEditingController controller,
+    required FocusNode focusNode,
     required ValueChanged<String> onChanged,
     String? hint,
     bool obscure = false,
@@ -572,14 +856,15 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
         const SizedBox(height: 4),
         TextField(
           controller: controller,
+          focusNode: focusNode,
           onChanged: onChanged,
           obscureText: obscure,
-          style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+          style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
           decoration: InputDecoration(
             isDense: true,
             hintText: hint,
-            hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 12),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(color: t.border),
@@ -655,8 +940,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
-  String _genName(String entry) => entry.split('|').first.trim();
-
   // ═══════════════════════════════════════════════════════
   // ② 订阅抓取
   // ═══════════════════════════════════════════════════════
@@ -708,14 +991,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: AppThemeExt.of(context).border),
             ),
-            child: SwitchListTile(
-              title: Text('⚠️ 跳过 TLS 证书校验', style: TextStyle(fontSize: 13, color: AppThemeExt.of(context).text)),
-              subtitle: Text('自签/过期证书源才开启', style: TextStyle(fontSize: 12, color: AppThemeExt.of(context).textDim)),
-              value: cfg.subInsecure,
-              onChanged: (v) => _save(cfg.copyWith(subInsecure: v)),
-              activeThumbColor: AppTheme.edgeOrange,
-              dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile(
+                title: Text('⚠️ 跳过 TLS 证书校验', style: TextStyle(fontSize: 13, color: AppThemeExt.of(context).text)),
+                subtitle: Text('自签/过期证书源才开启', style: TextStyle(fontSize: 12, color: AppThemeExt.of(context).textDim)),
+                value: cfg.subInsecure,
+                onChanged: (v) => _save(cfg.copyWith(subInsecure: v)),
+                activeThumbColor: AppTheme.edgeOrange,
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
             ),
           ),
           const SizedBox(height: 16),
@@ -735,14 +1021,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       ),
       child: Column(
         children: [
-          SwitchListTile(
-            title: Text('定时自动更新', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.text)),
-            subtitle: Text('按间隔自动抓取订阅并优选', style: TextStyle(fontSize: 12, color: t.textDim)),
-            value: cfg.subAutoUpdateEnabled,
-            onChanged: (v) => _save(cfg.copyWith(subAutoUpdateEnabled: v)),
-            activeThumbColor: AppTheme.edgeOrange,
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              title: Text('定时自动更新', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.text)),
+              subtitle: Text('按间隔自动抓取订阅并优选', style: TextStyle(fontSize: 12, color: t.textDim)),
+              value: cfg.subAutoUpdateEnabled,
+              onChanged: (v) => _save(cfg.copyWith(subAutoUpdateEnabled: v)),
+              activeThumbColor: AppTheme.edgeOrange,
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
           ),
           if (cfg.subAutoUpdateEnabled) ...[
             Divider(height: 1, color: t.border),
@@ -753,13 +1042,16 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   (v) => _save(cfg.copyWith(subAutoUpdateIntervalMin: v.round())),
                   suffix: ' 分钟'),
             ),
-            SwitchListTile(
-              title: Text('更新后自动运行延迟优选', style: TextStyle(fontSize: 13, color: t.text)),
-              value: cfg.subAutoUpdateRunLatency,
-              onChanged: (v) => _save(cfg.copyWith(subAutoUpdateRunLatency: v)),
-              activeThumbColor: AppTheme.edgeOrange,
-              dense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            Material(
+              type: MaterialType.transparency,
+              child: SwitchListTile(
+                title: Text('更新后自动运行延迟优选', style: TextStyle(fontSize: 13, color: t.text)),
+                value: cfg.subAutoUpdateRunLatency,
+                onChanged: (v) => _save(cfg.copyWith(subAutoUpdateRunLatency: v)),
+                activeThumbColor: AppTheme.edgeOrange,
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
             ),
           ],
         ],
@@ -772,40 +1064,129 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   // ═══════════════════════════════════════════════════════
 
   Widget _buildGitHubSection(BuildContext context, AppConfig cfg) {
+    final wide = MediaQuery.sizeOf(context).width >= 600;
     return SectionCollapsible(
       title: 'GitHub 推送',
       icon: Icons.cloud_upload,
       initiallyExpanded: false,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _compactTextField(
             label: 'Token',
             controller: _tokenCtl,
+            focusNode: _tokenFocus,
             onChanged: (v) => _save(cfg.copyWith(githubToken: v)),
             obscure: true,
           ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 2,
-                child: _compactTextField(
-                  label: '仓库 (owner/repo)',
-                  controller: _repoCtl,
-                  onChanged: (v) => _save(cfg.copyWith(githubRepo: v)),
+          const SizedBox(height: 12),
+          if (wide)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: _compactTextField(
+                    label: '仓库 (owner/repo)',
+                    controller: _repoCtl,
+                    focusNode: _repoFocus,
+                    onChanged: (v) => _save(cfg.copyWith(githubRepo: v)),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _compactTextField(
-                  label: '分支',
-                  controller: _branchCtl,
-                  onChanged: (v) => _save(cfg.copyWith(githubBranch: v)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _compactTextField(
+                    label: '分支',
+                    controller: _branchCtl,
+                    focusNode: _branchFocus,
+                    onChanged: (v) => _save(cfg.copyWith(githubBranch: v)),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            )
+          else ...[
+            _compactTextField(
+              label: '仓库 (owner/repo)',
+              controller: _repoCtl,
+              focusNode: _repoFocus,
+              onChanged: (v) => _save(cfg.copyWith(githubRepo: v)),
+            ),
+            const SizedBox(height: 12),
+            _compactTextField(
+              label: '分支',
+              controller: _branchCtl,
+              focusNode: _branchFocus,
+              onChanged: (v) => _save(cfg.copyWith(githubBranch: v)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // ④ WebDAV 同步
+  // ═══════════════════════════════════════════════════════
+
+  Widget _buildWebDavSection(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
+    return SectionCollapsible(
+      title: 'WebDAV 同步',
+      icon: Icons.cloud_sync_outlined,
+      initiallyExpanded: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '顶栏云朵按钮可手动推送备份 / 拉取恢复配置与结果文件',
+            style: TextStyle(fontSize: 12, color: t.textDim),
           ),
+          const SizedBox(height: 12),
+          _compactTextField(
+            label: '服务器地址',
+            controller: _wdUrlCtl,
+            focusNode: _wdUrlFocus,
+            onChanged: (v) => _save(cfg.copyWith(webdavUrl: v)),
+            hint: 'https://dav.jianguoyun.com/dav',
+          ),
+          const SizedBox(height: 12),
+          _compactTextField(
+            label: '账号',
+            controller: _wdUserCtl,
+            focusNode: _wdUserFocus,
+            onChanged: (v) => _save(cfg.copyWith(webdavUser: v)),
+          ),
+          const SizedBox(height: 12),
+          _compactTextField(
+            label: '密码',
+            controller: _wdPassCtl,
+            focusNode: _wdPassFocus,
+            onChanged: (v) => _save(cfg.copyWith(webdavPassword: v)),
+            obscure: true,
+          ),
+          const SizedBox(height: 16),
+          Material(
+            type: MaterialType.transparency,
+            child: SwitchListTile(
+              title: Text('自动同步', style: TextStyle(fontSize: 13, color: t.text)),
+              subtitle: Text('开启后按间隔自动推送备份', style: TextStyle(fontSize: 12, color: t.textDim)),
+              value: cfg.webdavAutoSync,
+              onChanged: (v) => _save(cfg.copyWith(webdavAutoSync: v)),
+              activeThumbColor: AppTheme.edgeOrange,
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+          ),
+          if (cfg.webdavAutoSync) ...[
+            Divider(height: 1, color: t.border),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              child: labeledSliderCountUp(context, '自动同步间隔（分钟）',
+                  cfg.webdavAutoSyncIntervalMin.toDouble(), 5, 480,
+                  (v) => _save(cfg.copyWith(webdavAutoSyncIntervalMin: v.round())),
+                  suffix: ' 分钟'),
+            ),
+          ],
         ],
       ),
     );

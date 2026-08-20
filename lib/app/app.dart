@@ -9,6 +9,7 @@ import '../features/results/result_state.dart';
 import '../features/subscriptions/config_tab.dart';
 import '../features/subscriptions/run_tab.dart';
 import '../features/subscriptions/subscriptions_state.dart';
+import '../features/webdav/webdav_sync_panel.dart';
 import '../main.dart' show systemTrayManager;
 import 'breakpoints.dart';
 import 'motion.dart';
@@ -70,6 +71,11 @@ class AppShell extends ConsumerWidget {
             tooltip: '最小化到托盘',
             onPressed: () => systemTrayManager.hideToTray(),
           ),
+        IconButton(
+          icon: const Icon(Icons.cloud_sync_outlined),
+          tooltip: 'WebDAV 同步',
+          onPressed: () => showWebDavSyncSheet(context, ref),
+        ),
         IconButton(
           icon: Icon(
             Theme.of(context).brightness == Brightness.dark
@@ -208,6 +214,9 @@ class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixi
       ..addStatusListener(_onStatus);
     _curve = CurvedAnimation(parent: _ctrl, curve: Motion.curveStandard);
     _buildAnimations(0);
+    // 首帧直接处于动画完成态：否则当前 tab 透明度为 0，首页空白，
+    // 必须切换 tab（didUpdateWidget 里 forward）后才可见。
+    _ctrl.value = 1.0;
   }
 
   @override

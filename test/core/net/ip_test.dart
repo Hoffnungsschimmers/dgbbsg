@@ -26,4 +26,32 @@ void main() {
     expect(isCloudflareIp('1.1.1.1'), isFalse);
     expect(isCloudflareIp('192.168.1.1'), isFalse);
   });
+  group('bracketIpv6Host', () {
+    test('bare ipv6 with port gets brackets', () {
+      expect(
+        bracketIpv6Host('2606:4700:8394:b884:22e2:7cb7:25bd:b7da:443#US'),
+        '[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#US',
+      );
+      expect(
+        bracketIpv6Host('2606:4700:8394:b884:22e2:7cb7:25bd:b7da:443'),
+        '[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443',
+      );
+    });
+    test('bare ipv6 without port gets brackets', () {
+      expect(bracketIpv6Host('2001:db8::1'), '[2001:db8::1]');
+      expect(bracketIpv6Host('::1'), '[::1]');
+      expect(bracketIpv6Host('fe80::1#US'), '[fe80::1]#US');
+    });
+    test('compressed ipv6 with port gets brackets', () {
+      expect(bracketIpv6Host('2001:db8::1:443'), '[2001:db8::1]:443');
+    });
+    test('idempotent for already bracketed', () {
+      expect(bracketIpv6Host('[2606:4700::1]:443#US'), '[2606:4700::1]:443#US');
+    });
+    test('leaves ipv4 and domain untouched', () {
+      expect(bracketIpv6Host('1.2.3.4:443#US'), '1.2.3.4:443#US');
+      expect(bracketIpv6Host('example.com:2053#US'), 'example.com:2053#US');
+      expect(bracketIpv6Host('1.2.3.4'), '1.2.3.4');
+    });
+  });
 }

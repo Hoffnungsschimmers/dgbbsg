@@ -5,9 +5,12 @@ import 'package:cfnb_app/app/theme.dart';
 import 'package:cfnb_app/core/config/app_config.dart';
 import 'package:cfnb_app/core/config/config_repository.dart';
 import 'package:cfnb_app/core/config/secure_kv.dart';
+import 'package:cfnb_app/core/github/github_push.dart';
 import 'package:cfnb_app/features/results/result_state.dart';
 import 'package:cfnb_app/features/results/results_tab.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
@@ -181,6 +184,19 @@ void main() {
       notifier.updateRow(99, '2.2.2.2:443#JP');
       expect(notifier.state.rows, hasLength(1));
     });
+
+    test('toText 序列化 node 与延迟', () {
+      notifier.setRows([
+        ResultRow('1.2.3.4:443#US mia', '50.00 ms'),
+        ResultRow('5.6.7.8:443#JP'),
+      ]);
+      expect(notifier.state.toText(),
+          '1.2.3.4:443#US mia 50.00 ms\n5.6.7.8:443#JP\n');
+    });
+
+    test('toText 空列表输出空字符串', () {
+      expect(notifier.state.toText(), '');
+    });
   });
 
   group('ResultsTab', () {
@@ -247,6 +263,160 @@ void main() {
       expect(notifier.state.currentFile, 'fallback.txt');
       expect(notifier.state.rows, hasLength(1));
       expect(notifier.state.rows[0].ipPort, '9.9.9.9:443');
+    });
+
+    Future<void> pumpResultsTab(
+      WidgetTester tester, {
+      required ProviderContainer container,
+    }) async {
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(body: ResultsTab()),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('地址按钮弹出选择列表，可复制源地址', (tester) async {
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          calls.add(call);
+          return null;
+        },
+      );
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null));
+
+      final container = ProviderContainer(overrides: [
+        configProvider.overrideWith((ref) async => const AppConfig(
+              subOutputFile: 'addressesapi.txt',
+              githubRepo: 'Hoffnungsschimmers/mnscn',
+              githubBranch: 'main',
+            )),
+      ]);
+      addTearDown(container.dispose);
+      await pumpResultsTab(tester, container: container);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '地址'));
+      await tester.pumpAndSettle();
+
+      // 对话框列出源地址 + 镜像
+      expect(find.text('选择要复制的地址'), findsOneWidget);
+      expect(find.text('源（GitHub Raw）'), findsOneWidget);
+      expect(find.text('jsDelivr CDN'), findsOneWidget);
+
+      await tester.tap(find.text('源（GitHub Raw）'));
+      await tester.pumpAndSettle();
+
+      final setData = calls.firstWhere((c) => c.method == 'Clipboard.setData');
+      expect((setData.arguments as Map)['text'],
+          'https://raw.githubusercontent.com/Hoffnungsschimmers/mnscn/refs/heads/main/addressesapi.txt');
+    });
+
+    testWidgets('地址选择可复制 jsDelivr 镜像地址', (tester) async {
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async {
+          calls.add(call);
+          return null;
+        },
+      );
+      addTearDown(() => tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null));
+
+      final container = ProviderContainer(overrides: [
+        configProvider.overrideWith((ref) async => const AppConfig(
+              subOutputFile: 'addressesapi.txt',
+              githubRepo: 'Hoffnungsschimmers/mnscn',
+              githubBranch: 'main',
+            )),
+      ]);
+      addTearDown(container.dispose);
+      await pumpResultsTab(tester, container: container);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '地址'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('jsDelivr CDN'));
+      await tester.pumpAndSettle();
+
+      final setData = calls.firstWhere((c) => c.method == 'Clipboard.setData');
+      expect((setData.arguments as Map)['text'],
+          'https://cdn.jsdelivr.net/gh/Hoffnungsschimmers/mnscn@main/addressesapi.txt');
+    });
+
+    testWidgets('推送按钮成功后提示并完成 API 调用', (tester) async {
+      final apiCalls = <String>[];
+      Future<Response<dynamic>> fakeSender(RequestOptions o) async {
+        apiCalls.add('${o.method} ${o.path}');
+        if (o.path.startsWith('/user')) {
+          return Response<dynamic>(statusCode: 200, requestOptions: o, data: <String, dynamic>{});
+        }
+        if (o.method == 'GET') {
+          throw DioException(requestOptions: o,
+              response: Response<dynamic>(statusCode: 404, requestOptions: o));
+        }
+        return Response<dynamic>(statusCode: 201, requestOptions: o, data: <String, dynamic>{});
+      }
+
+      final container = ProviderContainer(overrides: [
+        configProvider.overrideWith((ref) async => const AppConfig(
+              subOutputFile: 'addressesapi.txt',
+              githubToken: 'ghp_test',
+              githubRepo: 'Hoffnungsschimmers/mnscn',
+              githubBranch: 'main',
+            )),
+        resultProvider.overrideWith((ref) => ResultNotifier()
+          ..setRows([ResultRow('1.2.3.4:443#US mia', '50.00 ms')], 'addressesapi.txt')),
+        githubPushProvider.overrideWith((ref) => (cfg) => GithubPush(
+              token: cfg.githubToken,
+              repo: cfg.githubRepo,
+              branch: cfg.githubBranch,
+              sender: fakeSender,
+            )),
+      ]);
+      addTearDown(container.dispose);
+      await pumpResultsTab(tester, container: container);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '推送 GitHub'));
+      await tester.pumpAndSettle();
+
+      expect(apiCalls, containsAll([
+        'GET /user',
+        'GET /repos/Hoffnungsschimmers/mnscn/contents/addressesapi.txt',
+        'PUT /repos/Hoffnungsschimmers/mnscn/contents/addressesapi.txt',
+      ]));
+      expect(find.textContaining('推送成功'), findsOneWidget);
+    });
+
+    testWidgets('token 为空时提示且不发起推送', (tester) async {
+      var builderCalled = false;
+      final container = ProviderContainer(overrides: [
+        configProvider.overrideWith((ref) async => const AppConfig(
+              subOutputFile: 'addressesapi.txt',
+              githubToken: '',
+            )),
+        resultProvider.overrideWith((ref) => ResultNotifier()
+          ..setRows([ResultRow('1.2.3.4:443#US mia', '50.00 ms')], 'addressesapi.txt')),
+        githubPushProvider.overrideWith((ref) => (cfg) {
+              builderCalled = true;
+              return GithubPush(token: 'x', repo: 'o/r',
+                  sender: (o) async => Response<dynamic>(statusCode: 200, requestOptions: o));
+            }),
+      ]);
+      addTearDown(container.dispose);
+      await pumpResultsTab(tester, container: container);
+
+      await tester.tap(find.widgetWithText(OutlinedButton, '推送 GitHub'));
+      await tester.pump();
+
+      expect(builderCalled, isFalse);
+      expect(find.textContaining('GitHub Token'), findsOneWidget);
     });
   });
 }

@@ -31,6 +31,23 @@ class GithubSyncState {
   /// 上次操作的消息（成功/失败）。
   final String? message;
 
+  /// 搜索关键词（用于过滤节点）。
+  final String searchQuery;
+
+  /// 过滤后的节点列表（根据 searchQuery 筛选）。
+  List<ResultRow> get filteredRemoteNodes {
+    var result = remoteNodes;
+    if (searchQuery.isNotEmpty) {
+      final q = searchQuery.toLowerCase();
+      result = result
+          .where((r) =>
+              r.ipPort.toLowerCase().contains(q) ||
+              r.annotation.toLowerCase().contains(q))
+          .toList();
+    }
+    return result;
+  }
+
   const GithubSyncState({
     this.remoteNodes = const [],
     this.remoteSha,
@@ -39,6 +56,7 @@ class GithubSyncState {
     this.pushing = false,
     this.error,
     this.message,
+    this.searchQuery = '',
   });
 
   GithubSyncState copyWith({
@@ -53,6 +71,7 @@ class GithubSyncState {
     bool clearError = false,
     String? message,
     bool clearMessage = false,
+    String? searchQuery,
   }) =>
       GithubSyncState(
         remoteNodes: remoteNodes ?? this.remoteNodes,
@@ -62,6 +81,7 @@ class GithubSyncState {
         pushing: pushing ?? this.pushing,
         error: clearError ? null : (error ?? this.error),
         message: clearMessage ? null : (message ?? this.message),
+        searchQuery: searchQuery ?? this.searchQuery,
       );
 }
 
@@ -268,6 +288,11 @@ class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
   /// 清空状态。
   void reset() {
     state = const GithubSyncState();
+  }
+
+  /// 设置搜索关键词。
+  void setSearchQuery(String query) {
+    state = state.copyWith(searchQuery: query);
   }
 }
 

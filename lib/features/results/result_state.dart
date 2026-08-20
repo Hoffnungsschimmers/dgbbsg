@@ -91,7 +91,7 @@ List<ResultRow> parseResultLines(String text) {
     }
     // 节点部分 = 延迟之前的全部 token（含来源）
     final nodeEnd = latencyStart >= 0 ? latencyStart : parts.length;
-    final node = parts.sublist(0, nodeEnd).join(' ');
+    final node = bracketIpv6Host(parts.sublist(0, nodeEnd).join(' '));
     String? latency;
     if (latencyStart >= 0) {
       if (latencyStart + 1 < parts.length && parts[latencyStart + 1].contains('ms')) {
@@ -112,9 +112,6 @@ class ResultState {
   final String? rawText;
   final String? generatedAt; // 上次优选时间（来自 JSON 的 generated_at）
   final String searchQuery; // 搜索关键词
-  final String? filterCountry; // 按国家过滤（null = 全部）
-  final double? filterMaxLatency; // 按最大延迟过滤（null = 不限）
-  final double? filterMaxJitter; // 按最大抖动过滤（null = 不限）
 
   ResultState({
     this.rows = const [],
@@ -123,9 +120,6 @@ class ResultState {
     this.rawText,
     this.generatedAt,
     this.searchQuery = '',
-    this.filterCountry,
-    this.filterMaxLatency,
-    this.filterMaxJitter,
   });
 
   ResultState copyWith({
@@ -135,13 +129,7 @@ class ResultState {
     String? rawText,
     String? generatedAt,
     String? searchQuery,
-    String? filterCountry,
-    double? filterMaxLatency,
-    double? filterMaxJitter,
     bool clearFile = false,
-    bool clearCountry = false,
-    bool clearMaxLatency = false,
-    bool clearMaxJitter = false,
   }) =>
       ResultState(
         rows: rows ?? this.rows,
@@ -150,9 +138,6 @@ class ResultState {
         rawText: clearFile ? null : (rawText ?? this.rawText),
         generatedAt: clearFile ? null : (generatedAt ?? this.generatedAt),
         searchQuery: searchQuery ?? this.searchQuery,
-        filterCountry: clearCountry ? null : (filterCountry ?? this.filterCountry),
-        filterMaxLatency: clearMaxLatency ? null : (filterMaxLatency ?? this.filterMaxLatency),
-        filterMaxJitter: clearMaxJitter ? null : (filterMaxJitter ?? this.filterMaxJitter),
       );
 
   /// 过滤后的行：应用搜索
@@ -167,6 +152,17 @@ class ResultState {
           .toList();
     }
     return result;
+  }
+
+  /// 序列化为文件/推送内容：每行 `node [latency]`，行序即列表顺序。
+  String toText() {
+    final sb = StringBuffer();
+    for (final r in rows) {
+      final parts = <String>[r.node];
+      if (r.latency != null) parts.add(r.latency!);
+      sb.writeln(parts.join(' '));
+    }
+    return sb.toString();
   }
 }
 
@@ -184,7 +180,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
     final resolved = resolveOutputPath(path, (await getApplicationDocumentsDirectory()).path);
     final f = File(resolved);
     if (!f.existsSync()) {
-      state = state.copyWith(clearFile: true, searchQuery: '', clearCountry: true, clearMaxLatency: true);
+      state = state.copyWith(clearFile: true, searchQuery: '');
       return;
     }
     final text = await f.readAsString();
@@ -208,7 +204,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
               final port = n['port'] as int? ?? 0;
               final jitter = (n['jitter_ms'] as num?)?.toDouble();
               if (ip.isNotEmpty && port > 0 && jitter != null) {
-                jitterMap['$ip:$port'] = jitter;
+                jitterMap[bracketIpv6Host('$ip:$port')] = jitter;
               }
             }
           }
@@ -249,9 +245,9 @@ class ResultNotifier extends StateNotifier<ResultState> {
   void loadLines(List<String> lines, [String? label]) {
     final rows = lines
         .where((l) => l.trim().isNotEmpty && !l.trim().startsWith('#'))
-        .map((l) => ResultRow(l.trim()))
+        .map((l) => ResultRow(bracketIpv6Host(l.trim())))
         .toList();
-    state = state.copyWith(rows: rows, sourceLabel: label, searchQuery: '', clearCountry: true, clearMaxLatency: true);
+    state = state.copyWith(rows: rows, sourceLabel: label, searchQuery: '');
   }
 
   /// 删除指定索引的节点。
@@ -265,7 +261,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
 
   /// 更新指定索引的节点行。
   void updateRow(int index, String rawLine) {
-    final line = rawLine.trim();
+    final line = bracketIpv6Host(rawLine.trim());
     if (line.isEmpty || !line.contains(':')) return;
     if (index < 0 || index >= state.rows.length) return;
     final rows = [...state.rows];
@@ -275,7 +271,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
 
   /// 添加一个节点行（原始格式：ip:port#CC source）。
   void addRow(String rawLine) {
-    final line = rawLine.trim();
+    final line = bracketIpv6Host(rawLine.trim());
     if (line.isEmpty || !line.contains(':')) return;
     final rows = [...state.rows, ResultRow(line)];
     state = state.copyWith(rows: rows);
@@ -284,26 +280,6 @@ class ResultNotifier extends StateNotifier<ResultState> {
   /// 设置搜索关键词。
   void setSearchQuery(String query) {
     state = state.copyWith(searchQuery: query);
-  }
-
-  /// 设置国家过滤（null 表示全部）。
-  void setFilterCountry(String? country) {
-    state = state.copyWith(filterCountry: country, clearCountry: country == null);
-  }
-
-  /// 设置最大延迟过滤（null 表示不限）。
-  void setFilterMaxLatency(double? latency) {
-    state = state.copyWith(filterMaxLatency: latency, clearMaxLatency: latency == null);
-  }
-
-  /// 设置最大抖动过滤（null 表示不限）。
-  void setFilterMaxJitter(double? jitter) {
-    state = state.copyWith(filterMaxJitter: jitter, clearMaxJitter: jitter == null);
-  }
-
-  /// 清除所有过滤条件。
-  void clearFilters() {
-    state = state.copyWith(searchQuery: '', clearCountry: true, clearMaxLatency: true, clearMaxJitter: true);
   }
 
   /// 拖拽排序：将 [oldIndex] 处的行移动到 [newIndex]。
@@ -322,16 +298,10 @@ class ResultNotifier extends StateNotifier<ResultState> {
     final path = state.currentFile;
     if (path == null) return;
     final resolved = resolveOutputPath(path, (await getApplicationDocumentsDirectory()).path);
-    final sb = StringBuffer();
-    for (final r in state.rows) {
-      // 用原始 node 字符串重建行，保留国家码和来源
-      final parts = <String>[r.node];
-      if (r.latency != null) parts.add(r.latency!);
-      sb.writeln(parts.join(' '));
-    }
-    await File(resolved).writeAsString(sb.toString());
+    final text = state.toText();
+    await File(resolved).writeAsString(text);
     // 同步更新 rawText
-    state = state.copyWith(rawText: sb.toString());
+    state = state.copyWith(rawText: text);
   }
 }
 

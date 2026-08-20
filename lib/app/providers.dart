@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/config/app_config.dart';
 import '../core/config/config_repository.dart';
 import '../core/fetch/node_parser.dart';
+import '../core/github/github_push.dart';
 import '../core/logging/app_logger.dart';
 import '../core/notification/webhook_sender.dart';
 
@@ -59,3 +60,13 @@ final webhookSenderProvider = Provider<WebhookSender>((ref) {
   ));
   return WebhookSender(dio);
 });
+
+/// GitHub 推送构造器（结果页推送按钮使用）。独立 Provider 便于测试注入
+/// mock sender，避免真实网络请求。
+final githubPushProvider = Provider<GithubPush Function(AppConfig)>(
+  (ref) => (cfg) => GithubPush(
+        token: cfg.githubToken,
+        repo: cfg.githubRepo,
+        branch: cfg.githubBranch,
+      ),
+);

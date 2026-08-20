@@ -84,6 +84,9 @@ class ResultExporter {
     return 'ss';
   }
 
+  /// IPv6 加方括号（Clash/sing-box/V2Ray 的 server 字段要求）。
+  static String _ipForServer(String ip) => isIpv6(ip) ? '[$ip]' : ip;
+
   /// 将 [ResultRow] 转换为 (ip, port, country, latency, source) 五元组，
   /// 供各导出方法复用。
   static List<({String ip, int port, String country, double? latency, String source})>
@@ -137,12 +140,12 @@ class ResultExporter {
     for (final e in _buildEntries(rows)) {
       final proto = _detectProtocol(e.source);
       final name = e.country.isNotEmpty
-          ? '${e.ip}:${e.port} ${e.country}'
-          : '${e.ip}:${e.port}';
+          ? '${_ipForServer(e.ip)}:${e.port} ${e.country}'
+          : '${_ipForServer(e.ip)}:${e.port}';
       buf.writeln();
       buf.writeln('  - name: "$name"');
       buf.writeln('    type: $proto');
-      buf.writeln('    server: ${e.ip}');
+      buf.writeln('    server: ${_ipForServer(e.ip)}');
       buf.writeln('    port: ${e.port}');
       if (proto == 'ss') {
         buf.writeln('    cipher: auto');
@@ -177,7 +180,7 @@ class ResultExporter {
         settings = {
           'servers': [
             {
-              'address': e.ip,
+              'address': _ipForServer(e.ip),
               'port': e.port,
               'method': 'auto',
               'password': 'placeholder',
@@ -188,7 +191,7 @@ class ResultExporter {
         settings = {
           'vnext': [
             {
-              'address': e.ip,
+              'address': _ipForServer(e.ip),
               'port': e.port,
               'users': [
                 {
@@ -205,7 +208,7 @@ class ResultExporter {
         settings = {
           'servers': [
             {
-              'address': e.ip,
+              'address': _ipForServer(e.ip),
               'port': e.port,
               'password': 'placeholder',
             }
@@ -238,7 +241,7 @@ class ResultExporter {
       final proto = _detectProtocol(e.source);
       final entry = <String, dynamic>{
         'type': proto == 'ss' ? 'shadowsocks' : proto,
-        'server': e.ip,
+        'server': _ipForServer(e.ip),
         'server_port': e.port,
       };
       if (proto == 'ss') {

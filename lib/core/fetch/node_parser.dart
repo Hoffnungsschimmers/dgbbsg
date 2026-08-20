@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
 
+import '../net/ip.dart';
+
 /// 节点解析工具（对应旧版 fetcher 的解析函数）。
 ///
 /// 解析结果统一为 `ip:port#CC` 格式字符串，与旧版保持一致，便于后续探测/测速复用。
@@ -108,19 +110,25 @@ class NodeParser {
       if (v6Match != null) {
         ipPort = '[${v6Match.group(1)}]:${v6Match.group(2)}';
       } else {
-        // 匹配 IPv4
-        final ipMatch = ipv4Re.firstMatch(body);
-        if (ipMatch != null) {
-          final ip = ipMatch.group(1)!;
-          final port = ipMatch.group(2);
-          ipPort = port != null ? '$ip:$port' : '$ip:443';
+        // 裸 IPv6:port（如 2606:4700:...:443，无方括号）
+        final bareIpPort = _matchBareIpv6Port(body);
+        if (bareIpPort != null) {
+          ipPort = bareIpPort;
         } else {
-          // 匹配域名
-          final dm = domainRe.firstMatch(body);
-          if (dm != null) {
-            final domain = dm.group(1)!;
-            final port = dm.group(2);
-            ipPort = port != null ? '$domain:$port' : '$domain:443';
+          // 匹配 IPv4
+          final ipMatch = ipv4Re.firstMatch(body);
+          if (ipMatch != null) {
+            final ip = ipMatch.group(1)!;
+            final port = ipMatch.group(2);
+            ipPort = port != null ? '$ip:$port' : '$ip:443';
+          } else {
+            // 匹配域名
+            final dm = domainRe.firstMatch(body);
+            if (dm != null) {
+              final domain = dm.group(1)!;
+              final port = dm.group(2);
+              ipPort = port != null ? '$domain:$port' : '$domain:443';
+            }
           }
         }
       }
@@ -136,6 +144,28 @@ class NodeParser {
       }
     }
     return nodes;
+  }
+
+  /// 裸 IPv6 主机判定（不含方括号、不以冒号开头/结尾、≥3 段或含 ::）。
+  bool _isBareIpv6(String s) {
+    if (s.isEmpty || s.startsWith('[') || s.startsWith(':') || s.endsWith(':')) {
+      return false;
+    }
+    if (s.contains(']')) return false;
+    if (!s.contains(':')) return false;
+    return s.contains('::') || s.split(':').length >= 3;
+  }
+
+  /// 从文本匹配裸 IPv6:port，成功返回 `[ip]:port` 字符串。
+  /// 贪婪匹配从最长候选回溯，避免 `2606`+`:4700` 这类短候选；
+  /// 校验失败的候选自动跳过（allMatches 推进到下一处）。
+  String? _matchBareIpv6Port(String body) {
+    final re = RegExp(r'([0-9a-fA-F:]+):(\d{1,5})');
+    for (final m in re.allMatches(body)) {
+      final g1 = m.group(1)!;
+      if (_isBareIpv6(g1)) return '[$g1]:${m.group(2)}';
+    }
+    return null;
   }
 
   /// 递归从 JSON 结构提取节点。
@@ -156,7 +186,7 @@ class NodeParser {
       final port = data['port'];
       final code = data['country'] ?? data['cc'];
       if (ip != null && port != null && code != null) {
-        nodes.add('$ip:$port#${(code as String).toUpperCase()}');
+        nodes.add('${bracketIpv6Host('$ip:$port')}#${(code as String).toUpperCase()}');
       }
     } else if (data is String) {
       nodes.addAll(parseTextNodes(data));

@@ -11,8 +11,13 @@ import 'app/motion.dart';
 import 'app/providers.dart';
 import 'app/system_tray.dart';
 import 'app/theme.dart';
+import 'core/config/app_config.dart';
+import 'core/webdav/webdav_client.dart';
+import 'core/webdav/webdav_sync.dart';
+import 'features/results/result_state.dart';
 import 'features/subscriptions/subscriptions_state.dart';
 import 'features/widgets/common.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// Global instance so the app shell can access it.
 final SystemTrayManager systemTrayManager = SystemTrayManager();
@@ -50,6 +55,8 @@ class MyApp extends ConsumerStatefulWidget {
 
 class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   DateTime? _lastBackPress;
+  Timer? _wdAutoSyncTimer;
+  int? _wdAutoSyncMinutes;
 
   @override
   void initState() {
@@ -69,6 +76,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
 
   @override
   void dispose() {
+    _wdAutoSyncTimer?.cancel();
     if (isDesktopPlatform) {
       windowManager.removeListener(this);
       systemTrayManager.dispose();
@@ -80,6 +88,43 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
   @override
   void onWindowClose() {
     systemTrayManager.hideToTray();
+  }
+
+  /// 根据配置启停 WebDAV 自动同步定时器（间隔变化时重建）。
+  void _syncWebDavAutoSync(AppConfig cfg) {
+    if (!cfg.webdavAutoSync) {
+      _wdAutoSyncTimer?.cancel();
+      _wdAutoSyncTimer = null;
+      _wdAutoSyncMinutes = null;
+      return;
+    }
+    final minutes = cfg.webdavAutoSyncIntervalMin.clamp(5, 480);
+    if (_wdAutoSyncTimer != null && _wdAutoSyncMinutes == minutes) return;
+    _wdAutoSyncTimer?.cancel();
+    _wdAutoSyncMinutes = minutes;
+    _wdAutoSyncTimer = Timer.periodic(Duration(minutes: minutes), (_) {
+      _runWebDavAutoSync();
+    });
+  }
+
+  /// 自动同步：推送配置 + 结果文件（失败静默，下次到点重试）。
+  Future<void> _runWebDavAutoSync() async {
+    try {
+      var cfg = ref.read(latestConfigProvider);
+      cfg ??= (await ref.read(configRepositoryProvider.future)).current;
+      if (!cfg.webdavAutoSync || cfg.webdavUrl.trim().isEmpty) return;
+      final client = WebDavClient(
+        baseUrl: cfg.webdavUrl.trim(),
+        user: cfg.webdavUser.trim(),
+        password: cfg.webdavPassword,
+      );
+      await WebDavSync.backupConfig(client, cfg);
+      final docDir = (await getApplicationDocumentsDirectory()).path;
+      final names = WebDavSync.resultFileNames(cfg, ref.read(resultProvider).currentFile);
+      await WebDavSync.backupResults(client, docDir, names);
+    } catch (_) {
+      // 自动同步失败静默（不打扰用户，下次到点重试）。
+    }
   }
 
   Future<void> _initSystemTray() async {
@@ -150,6 +195,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
         if (ref.read(themeModeProvider) != initial) {
           ref.read(themeModeProvider.notifier).state = initial;
         }
+        _syncWebDavAutoSync(cfg);
       });
     });
 

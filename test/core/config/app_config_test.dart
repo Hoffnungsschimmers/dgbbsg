@@ -17,7 +17,7 @@ void main() {
       expect(c.subLatencyOutputFile, 'addressesapi_top.txt');
       expect(c.subInsecure, isFalse);
       expect(c.subLatencyMinSuccessRate, 0.34);
-      expect(c.githubRepo, 'Hoffnungsschimmers/cf-ip');
+      expect(c.githubRepo, 'Hoffnungsschimmers/mnscn');
     });
 
     test('dead fields removed', () {
@@ -31,6 +31,25 @@ void main() {
       expect(round.subDisabledGenerators, c.subDisabledGenerators);
       expect(round.subGenerators, c.subGenerators);
       expect(round.subLatencyProbes, c.subLatencyProbes);
+    });
+
+    test('webdav fields roundtrip', () {
+      const wd = AppConfig(
+        webdavUrl: 'https://dav.jianguoyun.com/dav',
+        webdavUser: 'me@example.com',
+        webdavPassword: 'p@ss',
+        webdavAutoSync: true,
+        webdavAutoSyncIntervalMin: 45,
+      );
+      final json = wd.toJson();
+      final round = AppConfig.fromJson(json);
+      expect(round.webdavUrl, 'https://dav.jianguoyun.com/dav');
+      expect(round.webdavUser, 'me@example.com');
+      expect(round.webdavAutoSync, isTrue);
+      expect(round.webdavAutoSyncIntervalMin, 45);
+      // 密码为敏感字段：不进 SharedPreferences JSON（经 SecureKV 存取）
+      expect(json.containsKey('WEBDAV_PASSWORD'), isFalse);
+      expect(round.webdavPassword, '');
     });
   });
 
@@ -60,6 +79,19 @@ void main() {
     test('rejects bad sub input mode', () {
       final bad = AppConfig.fromJson({'SUB_INPUT_MODE': 'xxx'});
       expect(bad.validate(), isNotEmpty);
+    });
+
+    test('auto sync requires webdav url and min interval', () {
+      final noUrl = AppConfig.fromJson({'WEBDAV_AUTO_SYNC': true});
+      expect(noUrl.validate(), isNotEmpty);
+      final badInterval =
+          AppConfig.fromJson({'WEBDAV_AUTO_SYNC_INTERVAL_MIN': 1});
+      expect(badInterval.validate(), isNotEmpty);
+      final ok = AppConfig.fromJson({
+        'WEBDAV_AUTO_SYNC': true,
+        'WEBDAV_URL': 'https://dav.test/dav',
+      });
+      expect(ok.validate(), isEmpty);
     });
   });
 

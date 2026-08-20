@@ -53,6 +53,22 @@ void main() {
       final nodes = parser.parseTextNodes('#1.2.3.4:443#US');
       expect(nodes, isEmpty);
     });
+    test('parses bare ipv6:port and adds brackets', () {
+      final nodes = parser
+          .parseTextNodes('2606:4700:8394:b884:22e2:7cb7:25bd:b7da:443#美国');
+      expect(
+        nodes,
+        ['[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#US'],
+      );
+    });
+    test('parses bracketed ipv6:port', () {
+      final nodes = parser
+          .parseTextNodes('[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#美国');
+      expect(
+        nodes,
+        ['[2606:4700:8394:b884:22e2:7cb7:25bd:b7da]:443#US'],
+      );
+    });
   });
 
   group('parseAdaptive', () {

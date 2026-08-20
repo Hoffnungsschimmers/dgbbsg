@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/motion.dart';
 import '../../app/theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/latency/latency_prober.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
@@ -22,6 +23,7 @@ class ResultsTab extends ConsumerStatefulWidget {
 
 class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAliveClientMixin {
   bool _rawView = false;
+  bool _pushing = false;
   final _addNodeCtrl = TextEditingController();
   final _rawTextCtrl = TextEditingController();
   final _searchCtl = TextEditingController();
@@ -271,6 +273,31 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                         // 导出
                         _exportButton(context, rows),
                       ],
+                      // 推送 GitHub
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                            foregroundColor: t.textDim,
+                            side: BorderSide(color: t.border),
+                            visualDensity: VisualDensity.compact),
+                        onPressed: _pushing ? null : _pushToGithub,
+                        icon: _pushing
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.upload, size: 16),
+                        label: const Text('推送 GitHub', style: TextStyle(fontSize: 13)),
+                      ),
+                      // 地址（复制 raw 地址）
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                            foregroundColor: t.textDim,
+                            side: BorderSide(color: t.border),
+                            visualDensity: VisualDensity.compact),
+                        onPressed: _showAddressPicker,
+                        icon: const Icon(Icons.link, size: 16),
+                        label: const Text('地址', style: TextStyle(fontSize: 13)),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -516,5 +543,92 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
     await io.File(path).writeAsString(content);
     if (!context.mounted) return;
     AppToast.show(context, '已导出 ${format.toUpperCase()}（已复制到剪贴板 + 保存到文件）');
+  }
+
+  /// 推送当前结果到 GitHub（仓库根目录，分支取配置）。
+  Future<void> _pushToGithub() async {
+    if (_pushing) return;
+    final cfg = ref.read(configProvider).valueOrNull;
+    if (cfg == null || cfg.githubToken.trim().isEmpty) {
+      AppToast.show(context, '请先在配置页填写 GitHub Token', success: false);
+      return;
+    }
+    final st = ref.read(resultProvider);
+    if (st.rows.isEmpty) {
+      AppToast.show(context, '当前结果为空，无法推送', success: false);
+      return;
+    }
+    final fileName =
+        (st.currentFile ?? cfg.subOutputFile).split(RegExp(r'[\\/]')).last;
+    setState(() => _pushing = true);
+    try {
+      final pusher = ref.read(githubPushProvider)(cfg);
+      await pusher.pushFile(
+        fileName,
+        st.toText(),
+        message: 'push from cfnb (${st.rows.length} nodes)',
+      );
+      if (!mounted) return;
+      AppToast.show(context, '推送成功：$fileName');
+    } catch (e) {
+      if (!mounted) return;
+      AppToast.show(context, '推送失败：$e', success: false);
+    } finally {
+      if (mounted) setState(() => _pushing = false);
+    }
+  }
+
+  /// 当前结果文件对应的 GitHub raw 地址及可直连镜像地址选项。
+/// 返回 [(名称, 地址), ...]，第一个为源地址。
+List<(String, String)> buildAddressOptions(AppConfig cfg, String fileName) {
+  final raw =
+      'https://raw.githubusercontent.com/${cfg.githubRepo}/refs/heads/${cfg.githubBranch}/$fileName';
+  return [
+    ('源（GitHub Raw）', raw),
+    ('jsDelivr CDN', 'https://cdn.jsdelivr.net/gh/${cfg.githubRepo}@${cfg.githubBranch}/$fileName'),
+    ('ghfast.top 加速', 'https://ghfast.top/$raw'),
+    ('moeyy 镜像', 'https://github.moeyy.xyz/$raw'),
+    ('ghproxy.net 镜像', 'https://ghproxy.net/$raw'),
+  ];
+}
+
+/// 弹出地址选择列表：复制当前结果文件对应的 GitHub raw 地址或镜像地址。
+  void _showAddressPicker() {
+    final cfg = ref.read(configProvider).valueOrNull;
+    if (cfg == null) return;
+    final st = ref.read(resultProvider);
+    final fileName =
+        (st.currentFile ?? cfg.subOutputFile).split(RegExp(r'[\\/]')).last;
+    final options = buildAddressOptions(cfg, fileName);
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('选择要复制的地址'),
+        children: [
+          for (final (label, url) in options)
+            SimpleDialogOption(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: url));
+                Navigator.pop(ctx);
+                AppToast.show(context, '已复制：$label');
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label),
+                  const SizedBox(height: 2),
+                  Text(
+                    url,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

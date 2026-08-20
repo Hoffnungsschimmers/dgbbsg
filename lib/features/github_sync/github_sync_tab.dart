@@ -23,6 +23,7 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
   bool _rawView = false;
   final _addNodeCtrl = TextEditingController();
   final _rawTextCtrl = TextEditingController();
+  final _searchCtl = TextEditingController();
 
   int _sortCol = 1;
   bool _sortAsc = true;
@@ -176,6 +177,11 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
       if (next.error != null && next.error != prev?.error) {
         AppToast.show(context, next.error!, success: false);
       }
+      // 搜索关键词变化时同步 TextField
+      if (next.searchQuery.isEmpty && _searchCtl.text.isNotEmpty) {
+        _searchCtl.clear();
+        setState(() {});
+      }
     });
 
     final rows = syncState.remoteNodes;
@@ -209,6 +215,13 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                       if (rows.isNotEmpty) ...[
                         const SizedBox(width: 10),
                         pill(context, '${rows.length} IP', t.surfaceHover),
+                      ],
+                      if (syncState.searchQuery.isNotEmpty) ...[
+                        const SizedBox(width: 10),
+                        Text(
+                          '${syncState.filteredRemoteNodes.length}/${rows.length}',
+                          style: TextStyle(color: AppTheme.edgeOrange, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
                       ],
                     ],
                   ),
@@ -277,6 +290,40 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                           icon: const Icon(Icons.filter_alt_off, size: 16),
                           label: const Text('去重', style: TextStyle(fontSize: 13)),
                         ),
+                        // 搜索框
+                        if (rows.isNotEmpty && !_rawView)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: SizedBox(
+                              width: 200,
+                              child: TextField(
+                                controller: _searchCtl,
+                                style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+                                decoration: InputDecoration(
+                                  hintText: '搜索 IP / 注释…',
+                                  hintStyle: TextStyle(color: t.textDim, fontSize: 13),
+                                  prefixIcon: const Icon(Icons.search, size: 18),
+                                  isDense: true,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  border: OutlineInputBorder(borderRadius: t.radius),
+                                  suffixIcon: _searchCtl.text.isNotEmpty
+                                      ? IconButton(
+                                          icon: const Icon(Icons.clear, size: 16),
+                                          onPressed: () {
+                                            _searchCtl.clear();
+                                            setState(() {});
+                                            ref.read(githubSyncProvider.notifier).setSearchQuery('');
+                                          },
+                                        )
+                                      : null,
+                                ),
+                                onChanged: (v) {
+                                  setState(() {});
+                                  ref.read(githubSyncProvider.notifier).setSearchQuery(v);
+                                },
+                              ),
+                            ),
+                          ),
                       ],
                     ],
                   ),

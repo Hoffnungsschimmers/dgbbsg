@@ -46,6 +46,13 @@ class AppConfig {
   final bool webhookOnComplete;   // 任务完成时通知
   final bool webhookOnError;      // 任务失败时通知
 
+  // ============ WebDAV 同步（云盘备份/恢复） ============
+  final String webdavUrl;        // WebDAV 服务器地址（如 https://dav.jianguoyun.com/dav）
+  final String webdavUser;       // 账号
+  final String webdavPassword;   // 密码（敏感，经 SecureKV 存储）
+  final bool webdavAutoSync;     // 自动同步开关（开启后按间隔定时推送备份）
+  final int webdavAutoSyncIntervalMin; // 自动同步间隔（分钟）
+
   // ============ 外观 ============
   final String guiTheme;
 
@@ -76,7 +83,7 @@ class AppConfig {
     this.subInsecure = false,
     this.subLatencyMinSuccessRate = 0.34,
     this.githubToken = '',
-    this.githubRepo = 'Hoffnungsschimmers/cf-ip',
+    this.githubRepo = 'Hoffnungsschimmers/mnscn',
     this.githubBranch = 'main',
     this.subAutoUpdateEnabled = false,
     this.subAutoUpdateIntervalMin = 60,
@@ -85,6 +92,11 @@ class AppConfig {
     this.webhookType = 'none',
     this.webhookOnComplete = true,
     this.webhookOnError = true,
+    this.webdavUrl = '',
+    this.webdavUser = '',
+    this.webdavPassword = '',
+    this.webdavAutoSync = false,
+    this.webdavAutoSyncIntervalMin = 30,
     this.guiTheme = 'light',
     this.hasCompletedOnboarding = false,
   });
@@ -145,6 +157,11 @@ class AppConfig {
       webhookType: pick('WEBHOOK_TYPE', 'none'),
       webhookOnComplete: pick('WEBHOOK_ON_COMPLETE', true),
       webhookOnError: pick('WEBHOOK_ON_ERROR', true),
+      webdavUrl: pick('WEBDAV_URL', ''),
+      webdavUser: pick('WEBDAV_USER', ''),
+      webdavPassword: pick('WEBDAV_PASSWORD', ''),
+      webdavAutoSync: pick('WEBDAV_AUTO_SYNC', false),
+      webdavAutoSyncIntervalMin: pick('WEBDAV_AUTO_SYNC_INTERVAL_MIN', 30),
       guiTheme: pick('GUI_THEME', 'light'),
       hasCompletedOnboarding: pick('HAS_COMPLETED_ONBOARDING', false),
     );
@@ -181,6 +198,10 @@ class AppConfig {
         'WEBHOOK_TYPE': webhookType,
         'WEBHOOK_ON_COMPLETE': webhookOnComplete,
         'WEBHOOK_ON_ERROR': webhookOnError,
+        'WEBDAV_URL': webdavUrl,
+        'WEBDAV_USER': webdavUser,
+        'WEBDAV_AUTO_SYNC': webdavAutoSync,
+        'WEBDAV_AUTO_SYNC_INTERVAL_MIN': webdavAutoSyncIntervalMin,
         'GUI_THEME': guiTheme,
         'HAS_COMPLETED_ONBOARDING': hasCompletedOnboarding,
       };
@@ -218,6 +239,11 @@ class AppConfig {
     String? webhookType,
     bool? webhookOnComplete,
     bool? webhookOnError,
+    String? webdavUrl,
+    String? webdavUser,
+    String? webdavPassword,
+    bool? webdavAutoSync,
+    int? webdavAutoSyncIntervalMin,
     String? guiTheme,
     bool? hasCompletedOnboarding,
   }) {
@@ -254,6 +280,12 @@ class AppConfig {
       webhookType: webhookType ?? this.webhookType,
       webhookOnComplete: webhookOnComplete ?? this.webhookOnComplete,
       webhookOnError: webhookOnError ?? this.webhookOnError,
+      webdavUrl: webdavUrl ?? this.webdavUrl,
+      webdavUser: webdavUser ?? this.webdavUser,
+      webdavPassword: webdavPassword ?? this.webdavPassword,
+      webdavAutoSync: webdavAutoSync ?? this.webdavAutoSync,
+      webdavAutoSyncIntervalMin:
+          webdavAutoSyncIntervalMin ?? this.webdavAutoSyncIntervalMin,
       guiTheme: guiTheme ?? this.guiTheme,
       hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );
@@ -285,6 +317,12 @@ class AppConfig {
     }
     if (webhookType != 'none' && !['telegram', 'discord'].contains(webhookType)) {
       errors.add("WEBHOOK_TYPE 必须是 'telegram'、'discord' 或 'none'");
+    }
+    if (webdavAutoSync && webdavUrl.isEmpty) {
+      errors.add('开启自动同步但 WebDAV 地址为空');
+    }
+    if (webdavAutoSyncIntervalMin < 5) {
+      errors.add('自动同步间隔必须 ≥ 5 分钟');
     }
     return errors;
   }

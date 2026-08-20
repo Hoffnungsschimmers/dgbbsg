@@ -205,3 +205,11 @@ all_optimized_ips.txt
 screenshot*.png
 app_*.png
 
+# 运行日志与临时文件
+analyze*.txt
+test_*.txt
+head.txt
+
+# 本机构建环境（Gradle 代理等），勿入库
+android/gradle.properties
+

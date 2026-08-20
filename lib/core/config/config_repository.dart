@@ -21,6 +21,7 @@ class ConfigRepository {
   static const _currentSchemaVersion = 1;
   static const _kGithubToken = 'github_token';
   static const _kWebhookUrl = 'webhook_url';
+  static const _kWebdavPassword = 'webdav_password';
 
   static Future<ConfigRepository> init({SecureKV? secure}) async {
     final prefs = await SharedPreferences.getInstance();
@@ -62,10 +63,12 @@ class ConfigRepository {
     // 安全存储（随后重写 JSON 时 toJson 已不含密钥，明文自动清除）。
     final secureToken = await secureKv.read(_kGithubToken);
     final secureWebhook = await secureKv.read(_kWebhookUrl);
-    if (secureToken != null || secureWebhook != null) {
+    final secureWebdavPass = await secureKv.read(_kWebdavPassword);
+    if (secureToken != null || secureWebhook != null || secureWebdavPass != null) {
       config = config.copyWith(
         githubToken: secureToken ?? config.githubToken,
         webhookUrl: secureWebhook ?? config.webhookUrl,
+        webdavPassword: secureWebdavPass ?? config.webdavPassword,
       );
     }
     if (secureToken == null && config.githubToken.isNotEmpty) {
@@ -74,6 +77,10 @@ class ConfigRepository {
     }
     if (secureWebhook == null && config.webhookUrl.isNotEmpty) {
       await secureKv.write(_kWebhookUrl, config.webhookUrl);
+      dirty = true;
+    }
+    if (secureWebdavPass == null && config.webdavPassword.isNotEmpty) {
+      await secureKv.write(_kWebdavPassword, config.webdavPassword);
       dirty = true;
     }
 
@@ -107,6 +114,11 @@ class ConfigRepository {
       await _secure.write(_kWebhookUrl, config.webhookUrl);
     } else {
       await _secure.delete(_kWebhookUrl);
+    }
+    if (config.webdavPassword.isNotEmpty) {
+      await _secure.write(_kWebdavPassword, config.webdavPassword);
+    } else {
+      await _secure.delete(_kWebdavPassword);
     }
     await _prefs.setString(_kConfigJson, jsonEncode(config.toJson()));
   }

@@ -169,9 +169,9 @@ class LatencyFilter {
     if (sepIdx >= 0) {
       final cc = after.substring(0, sepIdx);
       final rest = after.substring(sepIdx); // 保留分隔符
-      return '$before#${countryCodeToName(cc)}$rest';
+      return bracketIpv6Host('$before#${countryCodeToName(cc)}$rest');
     }
-    return '$before#${countryCodeToName(after)}';
+    return bracketIpv6Host('$before#${countryCodeToName(after)}');
   }
 }
 
