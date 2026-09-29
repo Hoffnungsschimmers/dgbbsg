@@ -14,6 +14,7 @@ import '../../core/config/app_config.dart';
 import '../../core/github/github_push.dart';
 import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
+import '../../core/net/landing_history.dart';
 import '../../core/net/proxy.dart';
 import '../../core/net/http_fetcher.dart';
 import '../../core/subscription/source_health.dart';
@@ -223,6 +224,8 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       }
       logger.info('开始落地检测（直连，当前网络的实际落地）：${ipOfNode.length} 个独立 IP');
       final landings = <String, String>{};
+      // IP → 机场码，仅 trace 成功时有值；落地历史需要区分「真实 POP」与「归属地兜底」。
+      final airportOf = <String, String>{};
       final traceFailed = <String>[]; // trace 查不到落地的 IP（多为非 CF 直连 IP）
       var done = 0;
       for (final entry in ipOfNode.entries) {
@@ -237,6 +240,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         done++;
         if (landing != null && landing.country.isNotEmpty) {
           landings[entry.key] = landing.country;
+          airportOf[entry.key] = landing.airport;
           logger.info('  [$done/${ipOfNode.length}] ${entry.key} → ${landing.airport}（${landing.country}）');
         } else if (landing != null) {
           logger.warning('  [$done/${ipOfNode.length}] ${entry.key} → 未知机场码 ${landing.airport}（已保留原标注）');
@@ -288,11 +292,22 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       }
       // 用真实落地覆盖国家码后写回同一文件，并刷新结果页。
       final outPath = await _resolve(cfg.landingOutputFile);
+      final outFile = File(outPath);
+      final now = DateTime.now().toString().substring(0, 19);
+      // 写回前快照：防一次误判的落地覆盖毁掉上一版好结果（保留最近 20 份）。
+      final snapDir = Directory('${outFile.parent.path}${Platform.pathSeparator}history');
+      final snap = snapshotLandingOutput(outFile, snapDir, now);
+      if (snap != null) {
+        logger.info('已备份上一版结果：${snap.uri.pathSegments.last}（${snapDir.path}）');
+      }
       final updated = nodes.map((n) => applyRealLanding(n, landings)).toList();
       await writeSubOutput(updated, outPath, extraMeta: {
         if (egress != null) 'egress_ip': egress.ip,
         if (egress != null && egress.colo.isNotEmpty) 'egress_colo': egress.colo,
       });
+      await _appendLandingHistory(now, landings, airportOf, egress);
+      // 历史已更新：让结果页的落地历史面板下次读取时重新加载。
+      ref.invalidate(landingHistoryProvider);
       await ref.read(resultProvider.notifier).loadFile(outPath);
       // 按国家分组汇总，方便按国家/地区分类使用。
       final groups = <String, int>{};
@@ -395,6 +410,35 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       await f.writeAsString(jsonEncode(cache));
     } catch (_) {
       // 写缓存失败不影响落地检测结果
+    }
+  }
+
+  /// 追加本轮落地观测到 `landing_history.json`（结果页「落地历史」的数据源）。
+  /// 失败静默——历史只是辅助信息，不能拖累落地检测本身。
+  Future<void> _appendLandingHistory(
+    String at,
+    Map<String, String> landings,
+    Map<String, String> airportOf,
+    EgressInfo? egress,
+  ) async {
+    if (landings.isEmpty) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final f = File('${dir.path}/landing_history.json');
+      final history =
+          f.existsSync() ? parseLandingHistory(await f.readAsString()) : <String, List<LandingObservation>>{};
+      final next = appendLandingRound(
+        history,
+        at: at,
+        results: {
+          for (final e in landings.entries)
+            e.key: (colo: airportOf[e.key] ?? '', cc: e.value),
+        },
+        egressIp: egress?.ip ?? '',
+      );
+      await f.writeAsString(encodeLandingHistory(next));
+    } catch (_) {
+      // 忽略历史写入失败
     }
   }
 
@@ -523,3 +567,21 @@ final subProvider = StateNotifierProvider<SubscriptionsNotifier, SubscriptionsSt
   ref.onDispose(notifier.dispose);
   return notifier;
 });
+
+/// 读取落地历史（文档目录 `landing_history.json`）。缺失或损坏时返回空表。
+/// 结果页「落地历史」面板与落地检测共用同一个文件。
+Future<LandingHistory> loadLandingHistory() async {
+  try {
+    final dir = await getApplicationDocumentsDirectory();
+    final f = File('${dir.path}/landing_history.json');
+    if (!f.existsSync()) return {};
+    return parseLandingHistory(await f.readAsString());
+  } catch (_) {
+    return {};
+  }
+}
+
+/// 落地历史数据源：结果页面板读取它，落地检测写回后使其失效以重新加载。
+/// 走 provider 而非让 UI 直接 await 平台通道，测试可注入数据。
+final landingHistoryProvider =
+    FutureProvider<LandingHistory>((ref) => loadLandingHistory());

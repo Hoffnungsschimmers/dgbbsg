@@ -12,6 +12,8 @@ import '../../core/config/app_config.dart';
 import '../../core/export/result_exporter.dart';
 import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
+import '../../core/net/landing_history.dart';
+import '../subscriptions/subscriptions_state.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
 import 'result_state.dart';
@@ -115,6 +117,16 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
       return _sortAsc ? cmp : -cmp;
     });
     return sorted;
+  }
+
+  /// 打开落地历史面板（IP → 历次落地变化）。
+  Future<void> _showLandingHistory() async {
+    final history = await ref.read(landingHistoryProvider.future);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => _LandingHistoryDialog(history: history),
+    );
   }
 
   /// 按国家分组的只读视图：每组一个带标题的表格卡片。
@@ -357,6 +369,14 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                                 .read(resultProvider.notifier)
                                 .refreshFile(cfg?.subOutputFile ?? '');
                           },
+                        ),
+                      // 落地历史
+                      if (rows.isNotEmpty && !_rawView)
+                        IconButton.filledTonal(
+                          icon: const Icon(Icons.history, size: 18),
+                          tooltip: '落地历史（各 IP 历次实测落地）',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _showLandingHistory,
                         ),
                       if (rows.isNotEmpty) ...[
                         // 视图切换
@@ -806,6 +826,114 @@ List<(String, String)> buildAddressOptions(AppConfig cfg, String fileName) {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// 落地历史面板：按 IP 展开查看历次实测落地（时间 / 机场码或归属地 / 国家码 / 当时的出口）。
+/// 用途：同一个 Cloudflare anycast IP 在不同网络下会落到不同 POP，这里留下的正是
+/// 「哪一次测量、走哪个出口、得到什么落地」的对照记录。
+class _LandingHistoryDialog extends StatefulWidget {
+  const _LandingHistoryDialog({required this.history});
+
+  final LandingHistory history;
+
+  @override
+  State<_LandingHistoryDialog> createState() => _LandingHistoryDialogState();
+}
+
+class _LandingHistoryDialogState extends State<_LandingHistoryDialog> {
+  final _queryCtl = TextEditingController();
+
+  @override
+  void dispose() {
+    _queryCtl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = AppThemeExt.of(context);
+    final q = _queryCtl.text.trim().toLowerCase();
+    final ips = widget.history.keys
+        .where((ip) => q.isEmpty || ip.toLowerCase().contains(q))
+        .toList()
+      ..sort();
+    final width = (MediaQuery.sizeOf(context).width * 0.86).clamp(280.0, 560.0);
+
+    return AlertDialog(
+      title: const Text('落地历史'),
+      content: SizedBox(
+        width: width,
+        height: 420,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _queryCtl,
+              style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+              decoration: InputDecoration(
+                hintText: '搜索 IP…',
+                hintStyle: TextStyle(color: t.textDim, fontSize: 13),
+                prefixIcon: const Icon(Icons.search, size: 18),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(borderRadius: t.radius),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: ips.isEmpty
+                  ? Center(
+                      child: Text(
+                        widget.history.isEmpty
+                            ? '还没有落地记录：先在运行页点「测落地」。'
+                            : '没有匹配的 IP。',
+                        style: TextStyle(color: t.textDim, fontSize: 13),
+                      ),
+                    )
+                  : ListView(
+                      children: [
+                        for (final ip in ips)
+                          ExpansionTile(
+                            dense: true,
+                            tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+                            title: Text(ip,
+                                style: const TextStyle(
+                                    fontFamily: 'AppMono',
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                              '当前 ${widget.history[ip]!.first.cc}'
+                              ' · 记录了 ${widget.history[ip]!.length} 次变化',
+                              style: TextStyle(fontSize: 11, color: t.textDim),
+                            ),
+                            children: [
+                              for (final o in widget.history[ip]!)
+                                ListTile(
+                                  dense: true,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                                  title: Text(
+                                    '${o.at}   ${o.colo.isEmpty ? '归属地' : o.colo} → ${o.cc}',
+                                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 12),
+                                  ),
+                                  subtitle: o.egressIp.isEmpty
+                                      ? null
+                                      : Text('出口 ${o.egressIp}',
+                                          style: TextStyle(fontSize: 11, color: t.textDim)),
+                                ),
+                            ],
+                          ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+      ],
     );
   }
 }
