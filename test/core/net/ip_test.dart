@@ -54,4 +54,14 @@ void main() {
       expect(bracketIpv6Host('1.2.3.4'), '1.2.3.4');
     });
   });
+  group('cfAirportToCountry', () {
+    test('maps known airports', () {
+      expect(cfAirportToCountry('hkg'), 'HK');
+      expect(cfAirportToCountry('SIN'), 'SG');
+      expect(cfAirportToCountry('NRT'), 'JP');
+    });
+    test('returns empty for unknown airport', () {
+      expect(cfAirportToCountry('XXX'), '');
+    });
+  });
 }

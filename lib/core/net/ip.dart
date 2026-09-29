@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 /// 判断 host 是否为 IP 地址（IPv4 或 IPv6，支持方括号包裹的 IPv6）。
@@ -190,6 +192,64 @@ const _cfAirportMap = <String, String>{
   'NOU': 'NC',
 };
 
+/// 单个 IP 的 cdn-cgi/trace 落地检测结果。
+/// [airport] 为 Cloudflare 边缘机场码（如 HKG）；[country] 为两位国家码；
+/// [trace] 为原始 trace 文本（调试用，失败时为空）。
+class CfLanding {
+  final String ip;
+  final String airport;
+  final String country;
+  final String trace;
+  const CfLanding({
+    required this.ip,
+    required this.airport,
+    required this.country,
+    required this.trace,
+  });
+}
+
+/// 对单个 IP 做 cdn-cgi/trace 请求，返回完整落地信息。
+/// [proxy] 非空时经指定代理（如 '127.0.0.1:7890'）；为空则直连。
+/// http/https 两种 scheme 各试一次；全部失败返回 null。
+/// 拼接 `colo=` 机场码并经 [cfAirportToCountry] 转国家码；机场码未知时
+/// country 为空但仍返回 airport/trace，供调用方展示原始落地。
+Future<CfLanding?> geolocateCfIp(
+  String ip, {
+  Duration? timeout,
+  String? proxy,
+  String traceHost = 'www.cloudflare.com',
+}) async {
+  final t = timeout ?? const Duration(milliseconds: 2500);
+  final host = isIpv6(ip) ? '[$ip]' : ip;
+  final client = HttpClient()..connectionTimeout = t;
+  if (proxy != null && proxy.isNotEmpty) {
+    client.findProxy = (uri) => 'PROXY $proxy';
+  }
+  try {
+    for (final scheme in ['http', 'https']) {
+      try {
+        final req = await client.getUrl(Uri.parse('$scheme://$host/cdn-cgi/trace'));
+        req.headers.set('Host', traceHost);
+        final resp = await req.close().timeout(t);
+        final body = await resp.transform(SystemEncoding().decoder).join();
+        final match = RegExp(r'colo=(\w+)').firstMatch(body);
+        if (match != null) {
+          final airport = match.group(1)!;
+          return CfLanding(
+            ip: ip,
+            airport: airport,
+            country: cfAirportToCountry(airport),
+            trace: body,
+          );
+        }
+      } catch (_) {}
+    }
+  } finally {
+    client.close(force: true);
+  }
+  return null;
+}
+
 /// 批量通过 cdn-cgi/trace 识别多个 IP 的地区，复用单个 [HttpClient]。
 ///
 /// 比逐个调用 [geolocateCfIp] 更高效：避免为每个 IP 创建/销毁 HttpClient。
@@ -232,6 +292,62 @@ Future<Map<String, String>> geolocateCfIpBatch(
       final cc = await traceOne(client, ip);
       if (cc.isNotEmpty) result[ip] = cc;
     }));
+  } finally {
+    client.close(force: true);
+  }
+  return result;
+}
+
+/// 批量查询 IP 归属地国家码（用于非 Cloudflare 边缘的直连 IP：源站/IDC）。
+///
+/// 对这类固定服务器 IP，出口即服务器所在地，其归属地就是真实落地国家。
+/// 走 ip-api.com 免费批量端点（POST /batch，每次最多 100 个 IP，免费版 HTTP）。
+/// [proxy] 非空时经代理请求；[timeout] 为单次批请求超时（默认 8s）。
+/// 返回 IP → 两位大写国家码 映射；查询失败或无归属地的 IP 不在结果中。
+Future<Map<String, String>> geolocateIpCountryBatch(
+  List<String> ips, {
+  Duration? timeout,
+  String? proxy,
+}) async {
+  if (ips.isEmpty) return {};
+  final t = timeout ?? const Duration(seconds: 8);
+  final result = <String, String>{};
+  final client = HttpClient()..connectionTimeout = t;
+  if (proxy != null && proxy.isNotEmpty) {
+    client.findProxy = (uri) => 'PROXY $proxy';
+  }
+  try {
+    // ip-api.com 批量端点每次最多 100 个查询，超出需分块。
+    for (var i = 0; i < ips.length; i += 100) {
+      final chunk = ips.sublist(i, i + 100 > ips.length ? ips.length : i + 100);
+      final payload = jsonEncode([
+        for (final ip in chunk) {'query': ip, 'fields': 'status,countryCode,query'}
+      ]);
+      try {
+        final req = await client
+            .postUrl(Uri.parse('http://ip-api.com/batch'))
+            .timeout(t);
+        req.headers.contentType = ContentType.json;
+        req.write(payload);
+        final resp = await req.close().timeout(t);
+        final body = await resp.transform(utf8.decoder).join();
+        final decoded = jsonDecode(body);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is Map &&
+                item['status'] == 'success' &&
+                item['query'] is String &&
+                item['countryCode'] is String &&
+                (item['countryCode'] as String).isNotEmpty) {
+              result[item['query'] as String] =
+                  (item['countryCode'] as String).toUpperCase();
+            }
+          }
+        }
+      } catch (_) {
+        // 单个分块失败不影响其余分块
+      }
+    }
   } finally {
     client.close(force: true);
   }

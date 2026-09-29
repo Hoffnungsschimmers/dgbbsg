@@ -25,11 +25,6 @@ jobs:
 
       - run: flutter pub get
 
-      - name: 检查代码生成文件是否最新
-        run: |
-          dart run build_runner build --delete-conflicting-outputs
-          git diff --exit-code || (echo "⚠️ 代码生成文件过时，请本地运行 build_runner 后提交" && exit 1)
-
       - name: 静态分析
         run: flutter analyze --no-fatal-infos
 

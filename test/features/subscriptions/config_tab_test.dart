@@ -200,11 +200,12 @@ void main() {
     testWidgets('WebDAV 区块可展开并编辑保存服务器地址', (tester) async {
       await pumpTab(tester);
 
-      // 区块默认折叠 → 滚动到可见后点击标题展开
-      expect(find.text('服务器地址'), findsNothing);
+      // 区块默认展开（initiallyExpanded: true）→ 滚动到可见后直接断言字段
       await tester.scrollUntilVisible(find.text('WebDAV 同步'), 300,
           scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('WebDAV 同步'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('服务器地址'), 300,
+          scrollable: find.byType(Scrollable).first);
       await tester.pumpAndSettle();
       expect(find.text('服务器地址'), findsOneWidget);
       expect(find.text('账号'), findsOneWidget);
@@ -234,14 +235,12 @@ void main() {
     testWidgets('WebDAV 自动同步开关开启后显示间隔滑块', (tester) async {
       await pumpTab(tester);
 
-      await tester.scrollUntilVisible(find.text('WebDAV 同步'), 300,
+      // 区块默认展开 → 直接滚到「自动同步」开关
+      await tester.scrollUntilVisible(find.text('自动同步'), 300,
           scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('WebDAV 同步'));
       await tester.pumpAndSettle();
       expect(find.text('自动同步间隔（分钟）'), findsNothing);
 
-      await tester.scrollUntilVisible(find.text('自动同步'), 300,
-          scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('自动同步'));
       await tester.pumpAndSettle();
       expect(find.text('自动同步间隔（分钟）'), findsOneWidget);
@@ -249,6 +248,32 @@ void main() {
       final container =
           ProviderScope.containerOf(tester.element(find.byType(ConfigTab)));
       expect(container.read(configProvider).valueOrNull?.webdavAutoSync, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    testWidgets('落地检测区块展示代理输入框', (tester) async {
+      await pumpTab(tester);
+
+      await tester.scrollUntilVisible(find.text('落地检测'), 300,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      expect(find.text('落地检测'), findsOneWidget);
+
+      // 落地代理输入框可编辑保存（trim 后落盘）
+      await tester.scrollUntilVisible(
+          find.text('落地检测代理（开代理测落地时用，空=跟随系统代理）'), 300,
+          scrollable: find.byType(Scrollable).first);
+      await tester.pumpAndSettle();
+      final field = _fieldByHint('127.0.0.1:7890');
+      await tester.enterText(field, '  127.0.0.1:7890  ');
+      await tester.pumpAndSettle();
+
+      final container =
+          ProviderScope.containerOf(tester.element(find.byType(ConfigTab)));
+      expect(container.read(configProvider).valueOrNull?.landingProxy,
+          '127.0.0.1:7890');
 
       await tester.pumpWidget(const SizedBox());
       await tester.pump();

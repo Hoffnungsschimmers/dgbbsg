@@ -8,7 +8,7 @@ import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/config/config_repository.dart';
 
-/// 首次启动引导向导：PageView + 圆点指示器，五步完成基础配置。
+/// 首次启动引导向导：PageView + 圆点指示器，四步完成基础配置。
 class OnboardingWizard extends ConsumerStatefulWidget {
   final ConfigRepository repo;
   const OnboardingWizard({super.key, required this.repo});
@@ -20,7 +20,7 @@ class OnboardingWizard extends ConsumerStatefulWidget {
 class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
   final _pageCtrl = PageController();
   int _currentPage = 0;
-  static const _totalPages = 5;
+  static const _totalPages = 4;
 
   // ---- Step 2 本地状态 ----
   String _subInputMode = 'both';
@@ -29,11 +29,6 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
   final _urlTextCtl = TextEditingController();
 
   // ---- Step 3 本地状态 ----
-  double _maxLatency = 300;
-  double _topN = 50;
-  double _timeout = 3.0;
-
-  // ---- Step 4 本地状态 ----
   final _tokenCtl = TextEditingController();
   final _repoCtl = TextEditingController();
 
@@ -45,9 +40,6 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
     _generators = List.of(cfg.subGenerators);
     _disabledGenerators = Set.of(cfg.subDisabledGenerators);
     _urlTextCtl.text = cfg.subUrls.join('\n');
-    _maxLatency = cfg.subLatencyMaxMs.toDouble();
-    _topN = cfg.subLatencyTopN.toDouble();
-    _timeout = cfg.subLatencyTimeout;
     _tokenCtl.text = cfg.githubToken;
     _repoCtl.text = cfg.githubRepo;
   }
@@ -86,9 +78,6 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
       subGenerators: _generators,
       subDisabledGenerators: _disabledGenerators,
       subUrls: urls,
-      subLatencyMaxMs: _maxLatency.round(),
-      subLatencyTopN: _topN.round(),
-      subLatencyTimeout: _timeout,
       githubToken: _tokenCtl.text.trim(),
       githubRepo: _repoCtl.text.trim(),
       hasCompletedOnboarding: true,
@@ -120,9 +109,8 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
                 children: [
                   _buildStep1Welcome(t, isWide),
                   _buildStep2InputMode(t, isWide),
-                  _buildStep3Latency(t, isWide),
-                  _buildStep4Github(t, isWide),
-                  _buildStep5Completion(t, isWide),
+                  _buildStep3Github(t, isWide),
+                  _buildStep4Completion(t, isWide),
                 ],
               ),
             ),
@@ -163,7 +151,7 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
           ),
           const SizedBox(height: 16),
           Text(
-            '自动抓取订阅节点\nTCP 延迟测试 → 保留最优节点 → 推送 GitHub',
+            '自动抓取订阅节点\n检测 IP 落地地区 → 推送 GitHub',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 15, color: t.textDim, height: 1.6),
           ),
@@ -336,116 +324,9 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
   }
 
   // =========================================================================
-  //  Step 3: Latency Settings
+  //  Step 3: GitHub (Optional)
   // =========================================================================
-  Widget _buildStep3Latency(AppThemeExt t, bool isWide) {
-    return _stepContainer(
-      isWide: isWide,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _stepTitle('延迟优选参数', t),
-            const SizedBox(height: 24),
-
-            _sectionLabel('最大延迟 (ms)', t),
-            Text(
-              '只保留延迟低于此值的节点',
-              style: TextStyle(fontSize: 12, color: t.textDim),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: Slider(
-                    value: _maxLatency,
-                    min: 50,
-                    max: 500,
-                    divisions: 45,
-                    activeColor: AppTheme.edgeOrange,
-                    onChanged: (v) => setState(() => _maxLatency = v),
-                  ),
-                ),
-                SizedBox(
-                  width: 56,
-                  child: Text(
-                    '${_maxLatency.round()} ms',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.edgeOrange),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            _sectionLabel('保留前 N 名', t),
-            Text(
-              '按延迟排序后只保留前 N 个最优节点（0 = 全部保留）',
-              style: TextStyle(fontSize: 12, color: t.textDim),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: Slider(
-                    value: _topN,
-                    min: 10,
-                    max: 200,
-                    divisions: 19,
-                    activeColor: AppTheme.edgeOrange,
-                    onChanged: (v) => setState(() => _topN = v),
-                  ),
-                ),
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    '${_topN.round()}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.edgeOrange),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            _sectionLabel('连接超时 (秒)', t),
-            Text(
-              'TCP 探测的超时时间，越短越快但可能丢弃慢节点',
-              style: TextStyle(fontSize: 12, color: t.textDim),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Expanded(
-                  child: Slider(
-                    value: _timeout,
-                    min: 1.0,
-                    max: 10.0,
-                    divisions: 18,
-                    activeColor: AppTheme.edgeOrange,
-                    onChanged: (v) => setState(() => _timeout = v),
-                  ),
-                ),
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    '${_timeout.toStringAsFixed(1)}s',
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.edgeOrange),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 32),
-            _buildNavButtons(showBack: true, onNext: _nextPage),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // =========================================================================
-  //  Step 4: GitHub (Optional)
-  // =========================================================================
-  Widget _buildStep4Github(AppThemeExt t, bool isWide) {
+  Widget _buildStep3Github(AppThemeExt t, bool isWide) {
     return _stepContainer(
       isWide: isWide,
       child: SingleChildScrollView(
@@ -552,9 +433,9 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
   }
 
   // =========================================================================
-  //  Step 5: Completion
+  //  Step 4: Completion
   // =========================================================================
-  Widget _buildStep5Completion(AppThemeExt t, bool isWide) {
+  Widget _buildStep4Completion(AppThemeExt t, bool isWide) {
     return _stepContainer(
       isWide: isWide,
       child: Column(

@@ -25,32 +25,6 @@ class _FakePathProvider extends PathProviderPlatform {
 }
 
 void main() {
-  group('parseLatency()', () {
-    test('解析 "50.00 ms" 格式', () {
-      expect(parseLatency('50.00 ms'), 50.0);
-    });
-
-    test('解析 "50.00ms" 格式（无空格）', () {
-      expect(parseLatency('50.00ms'), 50.0);
-    });
-
-    test('解析纯数字', () {
-      expect(parseLatency('123.45'), 123.45);
-    });
-
-    test('null 返回 null', () {
-      expect(parseLatency(null), isNull);
-    });
-
-    test('空字符串返回 null', () {
-      expect(parseLatency(''), isNull);
-    });
-
-    test('非数字返回 null', () {
-      expect(parseLatency('abc'), isNull);
-    });
-  });
-
   group('ResultRow', () {
     test('ipPort 提取正确', () {
       final row = ResultRow('1.2.3.4:443#US mia', '50.00 ms');
@@ -301,7 +275,7 @@ void main() {
       addTearDown(container.dispose);
       await pumpResultsTab(tester, container: container);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, '地址'));
+      await tester.tap(find.widgetWithText(OutlinedButton, '复制地址'));
       await tester.pumpAndSettle();
 
       // 对话框列出源地址 + 镜像
@@ -339,7 +313,7 @@ void main() {
       addTearDown(container.dispose);
       await pumpResultsTab(tester, container: container);
 
-      await tester.tap(find.widgetWithText(OutlinedButton, '地址'));
+      await tester.tap(find.widgetWithText(OutlinedButton, '复制地址'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('jsDelivr CDN'));

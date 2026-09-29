@@ -9,7 +9,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/motion.dart';
 import '../../app/theme.dart';
 import '../../core/config/app_config.dart';
-import '../../core/latency/latency_prober.dart';
+import '../../core/export/result_exporter.dart';
+import '../../core/net/endpoint.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
 import 'result_state.dart';
@@ -64,6 +65,32 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
     });
   }
 
+/// 右上角 IP 数量小框（圆角方框，青绿渐变，与表格区样式区分）。
+  Widget _ipCountBox(BuildContext context, int count) {
+    final t = AppThemeExt.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: t.accentGradient(),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_outlined, size: 16, color: Colors.white),
+          const SizedBox(width: 8),
+          Text(
+            '$count',
+            style: const TextStyle(
+                color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800, fontFamily: 'AppMono'),
+          ),
+          const SizedBox(width: 2),
+          const Text('IP', style: TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
   List<ResultRow> _sortRows(List<ResultRow> rows) {
     final sorted = [...rows];
     sorted.sort((a, b) {
@@ -86,7 +113,6 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
   void _showEditDialog(int originalIndex, ResultRow row) {
     final ipPortCtl = TextEditingController(text: row.ipPort);
     final sourceCtl = TextEditingController(text: row.source);
-    final latencyCtl = TextEditingController(text: row.latency ?? '');
 
     showDialog<void>(
       context: context,
@@ -101,9 +127,6 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
               const SizedBox(height: 12),
               TextField(controller: sourceCtl, style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
                 decoration: InputDecoration(labelText: '来源', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
-              const SizedBox(height: 12),
-              TextField(controller: latencyCtl, style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
-                decoration: InputDecoration(labelText: '延迟（如 50.00 ms）', isDense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12))),
             ],
           ),
           actions: [
@@ -112,7 +135,6 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
               onPressed: () {
                 final ipPort = ipPortCtl.text.trim();
                 final source = sourceCtl.text.trim();
-                final latency = latencyCtl.text.trim();
                 if (ipPort.isNotEmpty) {
                   final cc = nodeCountry(row.node);
                   final ccPart = cc.isNotEmpty ? '#$cc' : '';
@@ -120,7 +142,7 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                   final newNode = '$ipPort$ccPart$srcPart';
                   final currentRows = [...ref.read(resultProvider).rows];
                   if (originalIndex < currentRows.length) {
-                    currentRows[originalIndex] = ResultRow(newNode, latency.isNotEmpty ? latency : null);
+                    currentRows[originalIndex] = ResultRow(newNode, row.latency);
                     ref.read(resultProvider.notifier).setRows(currentRows, ref.read(resultProvider).sourceLabel);
                   }
                   ref.read(resultProvider.notifier).saveToFile();
@@ -160,25 +182,55 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── 标题行：标题 + 信息 pills ──
-                  Row(
-                    children: [
-                      Text('订阅结果',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 20)),
-                      if (rows.isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        pill(context, '${rows.length} IP', t.surfaceHover),
+                  // ── 标题行：标题 + 来源/时间 pills；IP 数量放右上角（窄屏自动换行）──
+                  LayoutBuilder(builder: (ctx, c) {
+                    final narrow = MediaQuery.sizeOf(context).width < 600;
+                    if (narrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text('订阅结果',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 20)),
+                              ),
+                              const Spacer(),
+                              if (rows.isNotEmpty) _ipCountBox(context, rows.length),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (state.sourceLabel != null)
+                                pill(context, state.sourceLabel!, t.surfaceHover),
+                              if (state.generatedAt != null)
+                                pillWithIcon(context, icon: Icons.schedule, text: state.generatedAt!, bg: t.surfaceHover),
+                            ],
+                          ),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Text('订阅结果',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 20)),
+                        if (state.sourceLabel != null) ...[
+                          const SizedBox(width: 10),
+                          pill(context, state.sourceLabel!, t.surfaceHover),
+                        ],
+                        if (state.generatedAt != null) ...[
+                          const SizedBox(width: 10),
+                          pillWithIcon(context, icon: Icons.schedule, text: state.generatedAt!, bg: t.surfaceHover),
+                        ],
+                        const Spacer(),
+                        if (rows.isNotEmpty) _ipCountBox(context, rows.length),
                       ],
-                      if (state.sourceLabel != null) ...[
-                        const SizedBox(width: 10),
-                        pill(context, state.sourceLabel!, t.surfaceHover),
-                      ],
-                      if (state.generatedAt != null) ...[
-                        const SizedBox(width: 10),
-                        pillWithIcon(context, icon: Icons.schedule, text: state.generatedAt!, bg: t.surfaceHover),
-                      ],
-                    ],
-                  ),
+                    );
+                  }),
                   const SizedBox(height: 14),
 
                   // ── 操作行：搜索 + 视图切换 + 按钮 ──
@@ -245,12 +297,10 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                                 return parts.join(' ');
                               }).join('\n');
                             } else {
-                              final lines = _rawTextCtrl.text.split('\n')
-                                  .map((l) => l.trim())
-                                  .where((l) => l.isNotEmpty)
-                                  .toList();
+                              // 回切解析视图：用 parseResultLines 还原 node/latency，
+                              // 避免整行吞入 ResultRow.node 导致延迟列丢失。
                               ref.read(resultProvider.notifier).setRows(
-                                lines.map((l) => ResultRow(l)).toList(),
+                                parseResultLines(_rawTextCtrl.text),
                                 state.sourceLabel,
                               );
                               ref.read(resultProvider.notifier).saveToFile();
@@ -263,12 +313,15 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                             Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('原始', style: TextStyle(fontSize: 13))),
                           ],
                         ),
-                        // 编辑
-                        IconButton.filledTonal(
-                          icon: Icon(editMode ? Icons.edit_off : Icons.edit, size: 18),
-                          tooltip: editMode ? '退出编辑' : '编辑',
-                          visualDensity: VisualDensity.compact,
+                        // 编辑（切换可编辑模式）
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                              foregroundColor: editMode ? t.accent : t.textDim,
+                              side: BorderSide(color: editMode ? t.accent : t.border),
+                              visualDensity: VisualDensity.compact),
                           onPressed: () => ref.read(editModeProvider.notifier).state = !editMode,
+                          icon: Icon(editMode ? Icons.check : Icons.edit, size: 16),
+                          label: Text(editMode ? '完成' : '编辑', style: const TextStyle(fontSize: 13)),
                         ),
                         // 导出
                         _exportButton(context, rows),
@@ -296,7 +349,7 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                             visualDensity: VisualDensity.compact),
                         onPressed: _showAddressPicker,
                         icon: const Icon(Icons.link, size: 16),
-                        label: const Text('地址', style: TextStyle(fontSize: 13)),
+                        label: const Text('复制地址', style: TextStyle(fontSize: 13)),
                       ),
                     ],
                   ),
@@ -469,7 +522,7 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                                 controller: _addNodeCtrl,
                                 style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
                                 decoration: InputDecoration(
-                                  hintText: 'ip:port#CC source',
+                                  hintText: 'ip:port#CC 来源 备注',
                                   hintStyle: TextStyle(color: t.textDim, fontSize: 13),
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -504,13 +557,20 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
 
   Widget _exportButton(BuildContext context, List<ResultRow> rows) {
     final t = AppThemeExt.of(context);
-    return PopupMenuButton<String>(
+    return PopupMenuButton<ExportFormat>(
       tooltip: '导出',
       enabled: rows.isNotEmpty,
-      onSelected: (key) => _doExport(context, rows, key),
+      onSelected: (format) => _doExport(context, rows, format),
       itemBuilder: (_) => [
-        PopupMenuItem(value: 'txt', child: Row(children: [const Icon(Icons.description, size: 16, color: AppTheme.edgeOrange), const SizedBox(width: 8), const Text('TXT', style: TextStyle(fontSize: 13))])),
-        PopupMenuItem(value: 'csv', child: Row(children: [const Icon(Icons.table_chart, size: 16, color: AppTheme.edgeOrange), const SizedBox(width: 8), const Text('CSV', style: TextStyle(fontSize: 13))])),
+        for (final format in ExportFormat.values)
+          PopupMenuItem(
+            value: format,
+            child: Row(children: [
+              Icon(format.icon, size: 16, color: AppTheme.edgeOrange),
+              const SizedBox(width: 8),
+              Text(format.label, style: const TextStyle(fontSize: 13)),
+            ]),
+          ),
       ],
       child: OutlinedButton.icon(
         style: OutlinedButton.styleFrom(foregroundColor: t.textDim, side: BorderSide(color: t.border), visualDensity: VisualDensity.compact),
@@ -521,28 +581,23 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
     );
   }
 
-  Future<void> _doExport(BuildContext context, List<ResultRow> rows, String format) async {
+  Future<void> _doExport(BuildContext context, List<ResultRow> rows, ExportFormat format) async {
     final dir = (await getApplicationDocumentsDirectory()).path;
     final ts = DateTime.now().millisecondsSinceEpoch;
-    String content;
-    String path;
-
-    if (format == 'csv') {
-      path = '$dir/export_$ts.csv';
-      final sb = StringBuffer('IP:Port,注释\n');
-      for (final r in rows) {
-        sb.writeln('"${r.ipPort}","${r.annotation}"');
-      }
-      content = sb.toString();
-    } else {
-      path = '$dir/export_$ts.txt';
-      content = rows.map((r) => '${r.ipPort}#${r.annotation}').join('\n');
-    }
+    final ext = switch (format) {
+      ExportFormat.csv => 'csv',
+      ExportFormat.clashYaml => 'yaml',
+      ExportFormat.v2rayJson => 'v2ray.json',
+      ExportFormat.singboxJson => 'singbox.json',
+      ExportFormat.plain => 'txt',
+    };
+    final path = '$dir/export_$ts.$ext';
+    final content = ResultExporter.export(rows, format);
 
     await Clipboard.setData(ClipboardData(text: content));
     await io.File(path).writeAsString(content);
     if (!context.mounted) return;
-    AppToast.show(context, '已导出 ${format.toUpperCase()}（已复制到剪贴板 + 保存到文件）');
+    AppToast.show(context, '已导出 ${format.label}（已复制到剪贴板 + 保存到文件）');
   }
 
   /// 推送当前结果到 GitHub（仓库根目录，分支取配置）。

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('parseResultLines', () {
-    test('parses ip.txt with speed and latency', () {
+    test('parses legacy ip.txt with Mbps remnants (dropped) and latency', () {
       const text = '# header\n'
           '1.1.1.1:443#US 120.50 Mbps 30.10 ms\n'
           '2.2.2.2:443#JP 9.80 Mbps 62.10 ms\n';
@@ -27,6 +27,32 @@ void main() {
       expect(rows[0].source, '洛璃');
       expect(rows[1].ipPort, '1.1.1.1:443');
       expect(rows[1].source, 'CM');
+    });
+    test('来源名 + 原始备注整体作为 source，国家码仍取首位', () {
+      const text = '1.1.1.1:443#US 麒麟 美国 洛杉矶 01\n';
+      final rows = parseResultLines(text);
+      expect(rows.single.ipPort, '1.1.1.1:443');
+      expect(rows.single.annotation, 'US 麒麟 美国 洛杉矶 01');
+      expect(rows.single.country, '美国');
+      expect(rows.single.source, '麒麟 美国 洛杉矶 01');
+      expect(rows.single.latency, isNull);
+    });
+    test('行尾「120ms」按历史延迟识别，写回不丢字符', () {
+      // 已下线的测速格式残留：行尾「数字+ms」会被切成 latency，
+      // 但 toText 原样拼回，文件内容不受损。
+      const text = '1.1.1.1:443#US 美国 120ms\n';
+      final rows = parseResultLines(text);
+      expect(rows.single.source, '美国');
+      expect(rows.single.latency, '120ms');
+      expect(ResultState(rows: rows).toText(), text);
+    });
+    test('备注中间的「120ms」不切延迟，整段备注保留', () {
+      const text = '1.1.1.1:443#US 麒麟 美国 120ms 优化专线\n';
+      final rows = parseResultLines(text);
+      expect(rows.single.latency, isNull);
+      expect(rows.single.annotation, 'US 麒麟 美国 120ms 优化专线');
+      expect(rows.single.source, '麒麟 美国 120ms 优化专线');
+      expect(ResultState(rows: rows).toText(), text);
     });
   });
 }

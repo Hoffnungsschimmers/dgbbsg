@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 
 import '../config/app_config.dart';
 import '../fetch/node_parser.dart';
-import '../latency/latency_prober.dart';
+import '../net/endpoint.dart';
 import 'sub_parser.dart';
 
 /// edgetunnel 系订阅器要求的 User-Agent（含项目特征串），用于触发
@@ -28,6 +28,25 @@ bool _isSpamNode(String host) {
     if (lower.contains(kw)) return true;
   }
   return false;
+}
+
+/// 备注清洗：`#` 换成 `-`（行内 `#` 是国家码分隔符），换行与连续空格压成一个。
+String _cleanRemark(String s) =>
+    s.replaceAll('#', '-').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+/// 原始节点名里已带来源名时剥掉，避免同一个名字在注释里出现两次。
+/// 只在「整段相同 / 开头 / 结尾」三种形态下剥离，不做子串替换。
+String _stripSourceDup(String remark, String source) {
+  final s = source.trim();
+  if (remark.isEmpty || s.isEmpty) return remark;
+  final lowerRemark = remark.toLowerCase();
+  final lowerSource = s.toLowerCase();
+  if (lowerRemark == lowerSource) return '';
+  if (lowerRemark.startsWith('$lowerSource ')) return remark.substring(s.length).trim();
+  if (lowerRemark.endsWith(' $lowerSource')) {
+    return remark.substring(0, remark.length - s.length - 1).trim();
+  }
+  return remark;
 }
 
 /// 解码订阅内容：若已是明文链接则原样返回，否则尝试 base64 解码。
@@ -149,11 +168,14 @@ List<(String, List<String>)> collectSubscriptionTasks(AppConfig config) {
         .where((u) => u.trim().isNotEmpty && !disabled.contains(u.trim()))
         .map((u) => u.trim())
         .toList();
-    // 每个 URL 单独一项，提取 "标签|URL" 格式中的标签作为来源名
+    // 每个 URL 单独一项，提取 "标签|URL" 格式中的标签作为来源名。
+    // 节点分享链接（supportedSchemes）本身不带标签；只有 http(s) 订阅地址
+    // 支持标签前缀。用 scheme 精确判断，避免 "备注A|https://…" 被误判
+    // 为无标签（它含 :// 但仍是带标签的订阅地址）。
     for (final url in urls) {
       var name = 'url';
       final pipeIdx = url.indexOf('|');
-      if (pipeIdx > 0 && !url.startsWith('vless://') && !url.startsWith('vmess://')) {
+      if (pipeIdx > 0 && !supportedSchemes.any((s) => url.startsWith(s))) {
         name = url.substring(0, pipeIdx).trim();
       }
       tasks.add((name, [url]));
@@ -171,8 +193,10 @@ typedef SubFetcher = Future<String> Function(String url, {String label});
 /// - sub:// 分享链接：先解码出内部地址再抓取。
 /// - 其余 http(s)：正常抓取。
 Future<String> fetchSingle(String url, SubFetcher fetch, {String label = ''}) async {
-  // 去掉 "标签|URL" 格式中的标签前缀（如 "𝓜𝓲𝓪|https://..." → "https://..."）
-  if (url.contains('|') && !url.startsWith('vless://') && !url.startsWith('vmess://')) {
+  // 去掉 "标签|URL" 格式中的标签前缀（如 "𝓜𝓲𝓪|https://..." → "https://..."）。
+  // 节点分享链接直接返回；只有非节点链接才需要剥离标签（同样用 scheme
+  // 精确判断，避免 "备注A|https://…" 被误判为节点链接而跳过剥离）。
+  if (url.contains('|') && !supportedSchemes.any((s) => url.startsWith(s))) {
     final pipeIdx = url.indexOf('|');
     final after = url.substring(pipeIdx + 1).trim();
     if (after.isNotEmpty) url = after;
@@ -202,7 +226,10 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
   return fallback ?? '';
 }
 
-/// 转换所有候选订阅器/订阅链接为标准 IP:port#CC 节点列表（去重）。
+/// 转换所有候选订阅器/订阅链接为标准节点列表（只按 IP+端口去重）。
+///
+/// 输出行格式 `ip:port#国家码 来源名 原始节点备注`：国家码取自原始名，
+/// 原始名里剩下的部分（地区/线路/编号等）作为备注保留在行尾。
 ///
 /// 返回记录：`nodes` 去重后的节点列表，`okSources` 解析出节点的源数，
 /// `failedSources` 拉取失败或未解析出节点的源数。[fetch] 注入真实 HTTP 拉取；
@@ -244,15 +271,19 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
           }
         } else {
           // 回退：按纯 IP/域名 列表解析（如 bestcf.pages.dev 的 txt 文件）
-          final textNodes = parser.parseTextNodes(content);
+          final textNodes = parser.parseTextNodesWithRemark(content);
           if (textNodes.isNotEmpty) bodySucceeded++;
           got += textNodes.length;
           for (final node in textNodes) {
-            // 已经是 ip:port#CC 格式，直接加入
-            final ep = parseEndpoint(node);
-            if (ep != null) {
-              rawNodes.add((host: ep.$1, port: ep.$2, name: node.split('#').last, source: name));
-            }
+            // 有标签但提不出国家码的行按原行为丢弃。
+            if (node.cc.isEmpty && node.remark.isNotEmpty) continue;
+            final ep = parseEndpoint(node.ipPort);
+            if (ep == null) continue;
+            // 拼成「国家码 原始备注」，与协议链接的原始名走同一套拆分逻辑。
+            final label = node.cc.isEmpty
+                ? node.remark
+                : '${node.cc} ${node.remark}'.trim();
+            rawNodes.add((host: ep.$1, port: ep.$2, name: label, source: name));
           }
         }
       }
@@ -281,20 +312,31 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
     }
   }
 
-  // 组装节点列表（不去重，不做地理定位）
+  // 组装节点列表：默认国家码兜底 + 只按 ip:port 去重。
+  // 同一 IP+端口只保留首次出现（国家码/来源标注不同也不保留多条）；
+  // 不同端口视为不同节点保留。
+  // 注释格式：`#国家码 来源名 原始节点备注`。
+  final defaultCc = config.subDefaultCountry.trim().toUpperCase();
   final nodes = <String>[];
+  final seenIpPort = <String>{};
   for (final r in rawNodes) {
     final ip = resolved[r.host];
     if (ip == null || ip.isEmpty) continue;
     if (_isSpamNode(r.host)) continue;
+    // 去重键只看 ip:port（归一小写后比较），国家码/来源不同也不保留多条。
+    if (!seenIpPort.add('${ip.toLowerCase()}:${r.port}')) continue;
     // IPv6 需要方括号包裹
     final addr = ip.contains(':') ? '[$ip]' : ip;
-    final anno = r.name.trim();
-    // 标准化国家码（中文名/三字母码 → 两位码）
-    final cc = anno.isNotEmpty ? parser.extractCountryCode(anno) : null;
-    final tag = cc ?? anno;
-    final node = tag.isNotEmpty ? '$addr:${r.port}#$tag' : '$addr:${r.port}';
-    nodes.add(node);
+    // 标准化国家码（中文名/三字母码 → 两位码），原始名中剩余部分留作备注；
+    // 无有效国家码时用默认国家码兜底。
+    final split = parser.splitLabel(r.name.trim());
+    final remark = _stripSourceDup(_cleanRemark(split.remark), r.source);
+    final tag = split.cc ?? (defaultCc.isNotEmpty ? defaultCc : remark);
+    nodes.add([
+      tag.isNotEmpty ? '$addr:${r.port}#$tag' : '$addr:${r.port}',
+      r.source,
+      if (remark.isNotEmpty && remark != tag) remark,
+    ].join(' ').trimRight());
   }
 
   onLog?.call('订阅获取完成：成功 $okSources 个源，失败 $failedSources 个源，共 ${rawNodes.length} 个节点，输出 ${nodes.length} 个。');
@@ -321,4 +363,3 @@ Future<void> writeSubOutput(List<String> nodes, String outputFile) async {
     'node_count': nodes.length,
   }));
 }
-

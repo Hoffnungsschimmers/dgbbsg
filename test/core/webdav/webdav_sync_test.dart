@@ -23,7 +23,7 @@ class _MemAdapter implements dio_pkg.HttpClientAdapter {
     if (options.method == 'PUT') {
       final bytes = <int>[];
       if (requestStream != null) {
-        await requestStream.listen(bytes.addAll).asFuture();
+        await requestStream.listen(bytes.addAll).asFuture<void>();
       }
       files[options.path] = bytes;
       return dio_pkg.ResponseBody.fromString('', 201);
@@ -94,7 +94,7 @@ void main() {
     test('resultFileNames 汇总输出文件/当前文件并带 .json 旁文件、去重排序', () {
       const cfg = AppConfig(
         subOutputFile: 'addressesapi.txt',
-        subLatencyOutputFile: 'addressesapi_top.txt',
+        landingOutputFile: 'addressesapi_top.txt',
       );
       final names = WebDavSync.resultFileNames(cfg, 'addressesapi.txt');
       expect(
@@ -125,7 +125,7 @@ void main() {
       final client = _client(adapter);
       const cfg = AppConfig(
         githubRepo: 'a/b',
-        subLatencyTopN: 7,
+        landingOutputFile: 'custom_top.txt',
         githubToken: 'secret-token',
         webdavPassword: 'wd-secret',
       );
@@ -133,7 +133,7 @@ void main() {
 
       final restored = await WebDavSync.restoreConfig(client);
       expect(restored.githubRepo, 'a/b');
-      expect(restored.subLatencyTopN, 7);
+      expect(restored.landingOutputFile, 'custom_top.txt');
       expect(restored.githubToken, 'secret-token');
       expect(restored.webdavPassword, 'wd-secret');
     });

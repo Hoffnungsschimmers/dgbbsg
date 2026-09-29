@@ -28,32 +28,38 @@ void main() {
       final csv = ResultExporter.toCsv(rows);
 
       // 包含表头
-      expect(csv, startsWith('ip,port,country,latency_ms,source'));
+      expect(csv, startsWith('ip,port,country,source'));
 
       final lines = csv.split('\n');
       // 表头 + 3 行数据
       expect(lines.length, 4);
 
       // 第一行：IPv4
-      expect(lines[1], '1.2.3.4,443,US,50.0,CM');
+      expect(lines[1], '1.2.3.4,443,US,CM');
 
-      // 第二行：端口 8080，延迟无空格格式
-      expect(lines[2], '10.0.0.1,8080,HK,120.5,VMess');
+      // 第二行：端口 8080
+      expect(lines[2], '10.0.0.1,8080,HK,VMess');
 
       // 第三行：IPv6
-      expect(lines[3], '2001:db8::1,443,JP,30.0,Trojan');
+      expect(lines[3], '2001:db8::1,443,JP,Trojan');
     });
 
     test('空列表只输出表头', () {
       final csv = ResultExporter.toCsv([]);
-      expect(csv, 'ip,port,country,latency_ms,source');
+      expect(csv, 'ip,port,country,source');
     });
 
-    test('延迟为 null 时输出空字符串', () {
+    test('行数据与延迟无关（延迟列已移除）', () {
       final rows = [ResultRow('1.2.3.4:443#US CM')];
       final csv = ResultExporter.toCsv(rows);
       final lines = csv.split('\n');
-      expect(lines[1], '1.2.3.4,443,US,,CM');
+      expect(lines[1], '1.2.3.4,443,US,CM');
+    });
+
+    test('来源含逗号时加双引号（原始节点备注常见）', () {
+      final rows = [ResultRow('1.2.3.4:443#US 麒麟 美国, Los Angeles 01')];
+      final lines = ResultExporter.toCsv(rows).split('\n');
+      expect(lines[1], '1.2.3.4,443,US,"麒麟 美国, Los Angeles 01"');
     });
 
     test('无效的 ipPort 被跳过', () {

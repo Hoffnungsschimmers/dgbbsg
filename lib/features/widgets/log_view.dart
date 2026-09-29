@@ -162,7 +162,7 @@ class _LogViewState extends State<LogView> {
                                   ? t.warning
                                   : _lines[i].startsWith('[成功]')
                                       ? t.success
-                                      : t.logFg,
+                                      : t.text,
                           fontWeight: _lines[i].startsWith('[错误]') ? FontWeight.w600 : FontWeight.normal,
                         ),
                       ),

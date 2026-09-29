@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cfnb_app/core/config/app_config.dart';
 import 'package:cfnb_app/core/fetch/node_parser.dart';
+import 'package:cfnb_app/core/net/endpoint.dart';
 import 'package:cfnb_app/core/subscription/subscription_converter.dart';
+import 'package:cfnb_app/features/results/result_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -104,12 +107,15 @@ void main() {
       final nodes = result.nodes;
       expect(result.okSources, 1);
       expect(result.failedSources, 0);
+      // 只按 ip:port 去重：两行解析到不同 IP，各保留一条
       expect(nodes.length, 2);
-      expect(nodes.any((n) => n.startsWith('1.1.1.1:443#US')), isTrue);
-      // IDK 非真实国家码，按等价逻辑回落到默认国家 ''（无 # 后缀）
-      expect(nodes.any((n) => n.startsWith('2.2.2.2:443')), isTrue);
-      // 去重按 ip:port#cc：两个不同 host 解析到同一 IP 但端口/国家码可能不同，
-      // 因此保留两条。仅同 ip:port#cc 才折叠为一条。
+      // 注释 = 国家码 + 来源名 + 原始节点备注
+      expect(nodes, contains('1.1.1.1:443#US url 美国'));
+      // IDK 非真实国家码，默认国家为空时整串原始名留在注释首位，不重复出现
+      expect(nodes, contains('2.2.2.2:443#IDK url'));
+      // 节点携带来源后缀，便于结果页/导出按源统计
+      expect(nodes.every((n) => n.contains(' url')), isTrue);
+      // 去重只看 ip:port：两个不同 host 解析到同一 IP 时折叠为一条。
       final cfg2 = AppConfig(subInputMode: 'url', subUrls: const ['https://my.sub/abcd']);
       Future<String?> dupResolve(String host) async => '9.9.9.9';
       final nodes2 = (await convertSubscriptions(
@@ -118,7 +124,7 @@ void main() {
         resolve: dupResolve,
         parser: parser,
       )).nodes;
-      expect(nodes2.length, 2);
+      expect(nodes2.length, 1);
     });
 
     test('全部源失败时统计失败源数', () async {
@@ -156,6 +162,162 @@ void main() {
       expect(result.nodes, isNotEmpty);
       expect(result.okSources, 1);
       expect(result.failedSources, 1);
+    });
+
+    test('默认国家码兜底无注释节点', () async {
+      Future<String> fetch(String url, {String label = ''}) async =>
+          'vless://u@node1.com:443';
+      final result = await convertSubscriptions(
+        AppConfig(
+          subInputMode: 'url',
+          subUrls: const ['https://a.ok/sub'],
+          subDefaultCountry: 'jp',
+        ),
+        fetch: fetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      expect(result.nodes.length, 1);
+      expect(result.nodes.first.startsWith('1.1.1.1:443#JP '), isTrue);
+    });
+
+    test('相同节点行去重', () async {
+      Future<String> fetch(String url, {String label = ''}) async =>
+          'vless://u@node1.com:443#US';
+      final result = await convertSubscriptions(
+        AppConfig(
+          subInputMode: 'both',
+          subGenerators: const ['G|sub.g.com'],
+          subUrls: const ['https://a.ok/sub'],
+        ),
+        fetch: (url, {String label = ''}) async {
+          // 订阅器候选 URL 均含 sub.g.com，统一返回同一节点行；
+          // https 订阅链接返回另一份相同节点行 → 两源同 ip:port 只保留一条。
+          if (url.contains('sub.g.com')) return 'vless://u@node1.com:443#US';
+          return fetch(url, label: label);
+        },
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      // 去重只按 ip:port：两源解析到同一 1.1.1.1:443 → 折叠为 1 条。
+      expect(result.okSources, 2);
+      expect(result.nodes.length, 1);
+      // 保留首次出现那条（订阅器 G 先于 url），备注用它的来源名。
+      expect(result.nodes, ['1.1.1.1:443#US G']);
+    });
+
+    test('同源完全相同行折叠', () async {
+      Future<String> fetch(String url, {String label = ''}) async =>
+          'vless://u@node1.com:443#US\nvless://u@node1.com:443#US';
+      final result = await convertSubscriptions(
+        AppConfig(
+          subInputMode: 'url',
+          subUrls: const ['https://a.ok/sub'],
+        ),
+        fetch: fetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      expect(result.nodes.length, 1);
+    });
+
+    test('注释保留原始节点备注', () async {
+      // 原始名「美国 洛杉矶 01」：国家码进 # 首位，剩余原文留作备注。
+      final link = 'vless://u@node1.com:443#${Uri.encodeComponent('美国 洛杉矶 01')}';
+      Future<String> fetch(String url, {String label = ''}) async => link;
+      final result = await convertSubscriptions(
+        const AppConfig(subInputMode: 'url', subUrls: ['麒麟|https://a.ok/sub']),
+        fetch: fetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      expect(result.nodes, ['1.1.1.1:443#US 麒麟 美国 洛杉矶 01']);
+    });
+
+    test('原始名自带来源名时注释不重复拼接', () async {
+      // 订阅把源名写进了节点名（「麒麟 美国 洛杉矶」），来源只出现一次。
+      final link = 'vless://u@node1.com:443#${Uri.encodeComponent('麒麟 美国 洛杉矶')}';
+      Future<String> fetch(String url, {String label = ''}) async => link;
+      final result = await convertSubscriptions(
+        const AppConfig(subInputMode: 'url', subUrls: ['麒麟|https://a.ok/sub']),
+        fetch: fetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      expect(result.nodes, ['1.1.1.1:443#US 麒麟 美国 洛杉矶']);
+    });
+
+    test('备注清洗：压缩空格、# 换成 -', () async {
+      final link = 'vless://u@node1.com:443#${Uri.encodeComponent('美国  洛杉矶#01')}';
+      Future<String> fetch(String url, {String label = ''}) async => link;
+      final result = await convertSubscriptions(
+        const AppConfig(subInputMode: 'url', subUrls: ['https://a.ok/sub']),
+        fetch: fetch,
+        resolve: (host) async => '1.1.1.1',
+        parser: parser,
+      );
+      expect(result.nodes, ['1.1.1.1:443#US url 美国 洛杉矶-01']);
+    });
+
+    test('纯文本列表源同样保留原始备注', () async {
+      // bestcf 类 txt 列表：# 后是国家码 + 原始备注（第二个 # 会被清洗）。
+      Future<String> fetch(String url, {String label = ''}) async =>
+          '47.245.140.240:2087#US#洛杉矶-优化\n1.2.3.4#美国  圣何塞';
+      final result = await convertSubscriptions(
+        const AppConfig(subInputMode: 'url', subUrls: ['速递|https://a.ok/sub']),
+        fetch: fetch,
+        resolve: (host) async => host,
+        parser: parser,
+      );
+      expect(result.nodes, [
+        '47.245.140.240:2087#US 速递 洛杉矶-优化',
+        '1.2.3.4:443#US 速递 美国 圣何塞',
+      ]);
+    });
+  });
+
+  group('输出链路', () {
+    test('获取 → 写文件 → 落地检测 → 结果页解析，备注全程不丢', () async {
+      final localParser = NodeParser(
+        cnToCode: {'美国': 'US', '德国': 'DE'},
+        alpha3ToAlpha2: {},
+      );
+      final dir = await Directory.systemTemp.createTemp('cfnb_remark');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = '${dir.path}${Platform.pathSeparator}addressesapi.txt';
+
+      Future<String> fetch(String url, {String label = ''}) async => [
+            'vless://u@node1.com:443#${Uri.encodeComponent('美国 洛杉矶 01')}',
+            'vless://u@node2.com:2053#${Uri.encodeComponent('德国 法兰克福 03')}',
+          ].join('\n');
+
+      final conv = await convertSubscriptions(
+        const AppConfig(subInputMode: 'url', subUrls: ['麒麟|https://a.ok/sub']),
+        fetch: fetch,
+        resolve: (h) async => h == 'node1.com' ? '1.1.1.1' : '2.2.2.2',
+        parser: localParser,
+      );
+      await writeSubOutput(conv.nodes, file);
+
+      expect(File(file).readAsLinesSync(), [
+        '1.1.1.1:443#US 麒麟 美国 洛杉矶 01',
+        '2.2.2.2:2053#DE 麒麟 德国 法兰克福 03',
+      ]);
+
+      // 落地检测按原始行改写国家码，备注不受影响。
+      final lines = (await File(file).readAsLines())
+          .map((e) => applyRealLanding(e, {'1.1.1.1': 'HK'}))
+          .toList();
+      expect(lines.first, '1.1.1.1:443#HK 麒麟 美国 洛杉矶 01');
+
+      // 结果页解析：国家码仍取注释首位，来源列 = 来源名 + 原始备注。
+      final row = parseResultLines(lines.join('\n')).first;
+      expect(row.ipPort, '1.1.1.1:443');
+      expect(nodeCountry(row.node), 'HK');
+      expect(row.source, '麒麟 美国 洛杉矶 01');
+      // 再写回（结果页保存路径）内容仍然一致。
+      expect(ResultState(rows: parseResultLines(lines.join('\n'))).toText().trimRight(),
+          lines.join('\n'));
     });
   });
 }

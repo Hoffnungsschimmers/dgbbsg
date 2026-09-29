@@ -1,18 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart' as dio_pkg;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../../app/motion.dart';
 import '../../app/notification_helper.dart';
 import '../../app/providers.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/config/app_config.dart';
 import '../../core/github/github_push.dart';
-import '../../core/latency/latency_filter.dart';
-import '../../core/latency/latency_prober.dart';
+import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
 import '../../core/net/proxy.dart';
 import '../../core/net/http_fetcher.dart';
@@ -20,13 +19,20 @@ import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
 
 /// 当前运行的动作类型。
-enum RunAction { subscription, latency }
+enum RunAction { subscription, landing }
+
+/// 落地检测进度（供运行页进度条/日志轮询展示）。
+class LandingProgress {
+  final int done;
+  final int total;
+  const LandingProgress(this.done, this.total);
+}
 
 /// 订阅器状态：含运行中标记、当前动作类型。
 class SubscriptionsState {
   final bool running;
   final RunAction? currentAction;
-  SubscriptionsState({this.running = false, this.currentAction});
+  const SubscriptionsState({this.running = false, this.currentAction});
   SubscriptionsState copyWith({bool? running, RunAction? currentAction, bool clearAction = false}) =>
       SubscriptionsState(
         running: running ?? this.running,
@@ -68,6 +74,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   Future<void> _initAutoUpdate() async {
     try {
       final cfg = await _cfg();
+      if (!mounted) return; // dispose 后不再启动定时器
       if (cfg.subAutoUpdateEnabled) {
         startAutoUpdate();
       }
@@ -80,10 +87,13 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   Future<void> startAutoUpdate() async {
     stopAutoUpdate();
     final cfg = await _cfg();
+    if (!mounted) return;
     if (!cfg.subAutoUpdateEnabled) return;
     final minutes = cfg.subAutoUpdateIntervalMin.clamp(5, 480);
     _autoUpdateTimer = Timer.periodic(Duration(minutes: minutes), (_) async {
+      if (!mounted) return;
       final latestCfg = await _cfg();
+      if (!mounted) return;
       if (!latestCfg.subAutoUpdateEnabled) {
         stopAutoUpdate();
         return;
@@ -91,9 +101,6 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       final logger = ref.read(subLoggerProvider);
       logger.info('自动更新触发（间隔 ${latestCfg.subAutoUpdateIntervalMin} 分钟）');
       await runSubscription();
-      if (latestCfg.subAutoUpdateRunLatency) {
-        await runLatency();
-      }
     });
   }
 
@@ -107,14 +114,6 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   void dispose() {
     stopAutoUpdate();
     super.dispose();
-  }
-
-  /// 一键运行：先订阅转换，再延迟优选。
-  Future<void> runAll() async {
-    await runSubscription();
-    if (!_cancelRequested && !state.running) {
-      await runLatency();
-    }
   }
 
   /// 单独：订阅IP（转换订阅器 -> addressesapi.txt）。
@@ -170,56 +169,133 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     }
   }
 
-  /// 单独：延迟优选（对订阅IP做延迟测试，保留前 N 名 -> addressesapi_top.txt）。
-  Future<void> runLatency() async {
-    if (state.running) return;
+  Future<AppConfig> _cfg() => readLatestConfig(ref);
+
+  /// 独立落地检测：对当前结果文件中的每个 IP 做 cdn-cgi/trace，
+  /// 用真实 POP 覆盖国家码后写回落地输出文件（默认 `landingOutputFile`）。
+  ///
+  /// 流程语义（对应用户操作）：
+  /// 1. 需要“开代理时的落地”→ 先开代理再点检测（经系统代理或配置的落地代理）；
+  /// 2. 需要“当前网络直连落地”→ 关代理后点检测（强制直连）。
+  /// [useProxy] 为 true 时经代理（优先配置的落地代理，否则系统代理），
+  /// 为 false 时强制直连。返回 (成功数, 总数)。
+  Future<(int, int)> runLandingCheck({required bool useProxy}) async {
+    if (state.running) return (0, 0);
     _cancelRequested = false;
-    state = state.copyWith(running: true, currentAction: RunAction.latency);
+    state = state.copyWith(running: true, currentAction: RunAction.landing);
     final cfg = await _cfg();
     final logger = ref.read(subLoggerProvider);
-    logger.info('开始「延迟优选」');
+    try {
+      final resultState = ref.read(resultProvider);
+      final currentFile = resultState.currentFile;
+      String readPath;
+      if (currentFile != null && currentFile.isNotEmpty && File(currentFile).existsSync()) {
+        readPath = currentFile;
+      } else {
+        readPath = await _resolve(cfg.landingOutputFile);
+      }
+      final nodes = await _readNodes(readPath, logger: logger);
+      if (nodes.isEmpty) {
+        logger.warning('文件中未找到有效节点（$readPath），请先运行「订阅IP」。');
+        return (0, 0);
+      }
+      // 落地检测只关心不重复的 IP（同 IP 多端口只查一次）。
+      final ipOfNode = <String, String>{};
+      for (final n in nodes) {
+        final ep = parseEndpoint(n);
+        if (ep != null) ipOfNode.putIfAbsent(ep.$1, () => n);
+      }
+      String? proxy;
+      if (useProxy) {
+        proxy = cfg.landingProxy.trim().isNotEmpty ? cfg.landingProxy.trim() : _systemProxy;
+      }
+      logger.info(useProxy
+          ? '开始落地检测（经代理 ${proxy ?? '无可用代理，直连替代'}）：${ipOfNode.length} 个独立 IP'
+          : '开始落地检测（直连，当前网络真实落地）：${ipOfNode.length} 个独立 IP');
+      final landings = <String, String>{};
+      final traceFailed = <String>[]; // trace 查不到落地的 IP（多为非 CF 直连 IP）
+      var done = 0;
+      for (final entry in ipOfNode.entries) {
+        if (_cancelRequested) {
+          logger.info('「落地检测」已取消');
+          return (landings.length, ipOfNode.length);
+        }
+        final landing = await geolocateCfIp(
+          entry.key,
+          timeout: const Duration(milliseconds: 4000),
+          proxy: proxy,
+        ).timeout(const Duration(seconds: 12), onTimeout: () => null);
+        done++;
+        if (landing != null && landing.country.isNotEmpty) {
+          landings[entry.key] = landing.country;
+          logger.info('  [$done/${ipOfNode.length}] ${entry.key} → ${landing.airport}（${landing.country}）');
+        } else if (landing != null) {
+          logger.warning('  [$done/${ipOfNode.length}] ${entry.key} → 未知机场码 ${landing.airport}（已保留原标注）');
+        } else {
+          // 非 CF 边缘 IP 没有 cdn-cgi/trace 接口，先收集起来走归属地兜底。
+          traceFailed.add(entry.key);
+          logger.info('  [$done/${ipOfNode.length}] ${entry.key} → 非 CF 边缘，转查归属地…');
+        }
+      }
 
-    // 优先使用 Results 标签页已加载的文件；否则回退到配置的输出文件。
-    final resultState = ref.read(resultProvider);
-    final currentFile = resultState.currentFile;
-    String readPath;
-    if (currentFile != null && currentFile.isNotEmpty && File(currentFile).existsSync()) {
-      readPath = currentFile;
-      logger.info('使用当前已加载的文件：$readPath');
-    } else {
-      readPath = await _resolve(cfg.subOutputFile);
-      logger.info('使用配置的输出文件：$readPath');
+      // 兜底：trace 查不到的直连 IP（源站/IDC）按 IP 归属地识别落地国家。
+      // 出口即服务器所在地，归属地即真实落地。先读本地缓存，未命中再批量查 ip-api.com。
+      if (traceFailed.isNotEmpty && !_cancelRequested) {
+        final cache = await _loadGeoCache();
+        final needQuery = <String>[];
+        for (final ip in traceFailed) {
+          final cached = cache[ip];
+          if (cached != null && cached.isNotEmpty) {
+            landings[ip] = cached;
+          } else {
+            needQuery.add(ip);
+          }
+        }
+        if (cache.isNotEmpty) {
+          final hit = traceFailed.length - needQuery.length;
+          if (hit > 0) logger.info('  归属地缓存命中 $hit 个');
+        }
+        if (needQuery.isNotEmpty) {
+          logger.info('  批量查询 ${needQuery.length} 个 IP 的归属地（ip-api.com）…');
+          final geo = await geolocateIpCountryBatch(needQuery, proxy: proxy);
+          geo.forEach((ip, cc) {
+            landings[ip] = cc;
+            cache[ip] = cc;
+          });
+          await _saveGeoCache(cache);
+          for (final ip in needQuery) {
+            if (geo.containsKey(ip)) {
+              logger.info('  归属地 $ip → ${geo[ip]}');
+            } else {
+              logger.warning('  归属地 $ip → 查询失败（已保留原标注）');
+            }
+          }
+        }
+      }
+
+      if (landings.isEmpty) {
+        logger.warning('落地检测完成：${ipOfNode.length} 个 IP 均未识别到落地，文件未改动。');
+        return (0, ipOfNode.length);
+      }
+      // 用真实落地覆盖国家码后写回同一文件，并刷新结果页。
+      final outPath = await _resolve(cfg.landingOutputFile);
+      final updated = nodes.map((n) => applyRealLanding(n, landings)).toList();
+      await writeSubOutput(updated, outPath);
+      await ref.read(resultProvider.notifier).loadFile(outPath);
+      // 按国家分组汇总，方便按国家/地区分类使用。
+      final groups = <String, int>{};
+      for (final n in updated) {
+        final cc = nodeCountry(n);
+        groups[cc.isEmpty ? '未知' : cc] = (groups[cc.isEmpty ? '未知' : cc] ?? 0) + 1;
+      }
+      final summary = groups.entries.map((e) => '${e.key}×${e.value}').join('、');
+      logger.success('落地检测完成：${landings.length}/${ipOfNode.length} 个 IP 已更新 → $outPath（$summary）');
+      _notifyWebhook(cfg, title: '落地检测完成', body: '${landings.length}/${ipOfNode.length} 个 IP 已更新（$summary）', isError: false);
+      return (landings.length, ipOfNode.length);
+    } finally {
+      state = state.copyWith(running: false, clearAction: true);
     }
-    final nodes = await _readNodes(readPath, logger: logger);
-    if (nodes.isEmpty) {
-      logger.warning('文件中未找到有效节点（$readPath）。'
-          '请确认文件格式为 ip:port#CC（每行一个），或先运行「订阅IP」生成。');
-    } else {
-      final latencyOut = await _resolve(cfg.subLatencyOutputFile);
-      final (kept, tested, connected) = await LatencyFilter.run(
-        nodes: nodes,
-        outputFile: latencyOut,
-        latencyMaxMs: cfg.subLatencyMaxMs,
-        timeout: Duration(milliseconds: (cfg.subLatencyTimeout * 1000).round()),
-        workers: cfg.subLatencyWorkers,
-        probes: cfg.subLatencyProbes,
-        minSuccessRate: cfg.subLatencyMinSuccessRate,
-        topN: cfg.subLatencyTopN > 0 ? cfg.subLatencyTopN : 100000,
-        probe: measureLatency,
-      );
-      // 最终结果
-      logger.success('延迟优选完成：测试 $tested / 连通 $connected / 保留 ${kept.length}');
-      NotificationHelper.taskComplete(
-        taskName: '延迟优选完成',
-        summary: '测试 $tested / 连通 $connected / 保留 ${kept.length}',
-      );
-      _notifyWebhook(cfg, title: '延迟优选完成', body: '测试 $tested / 连通 $connected / 保留 ${kept.length}', isError: false);
-      await ref.read(resultProvider.notifier).loadFile(latencyOut);
-    }
-    state = state.copyWith(running: false, clearAction: true);
   }
-
-  Future<AppConfig> _cfg() => readLatestConfig(ref);
 
   /// 发送 Webhook 通知（若已配置）。静默失败，不影响主流程。
   Future<void> _notifyWebhook(AppConfig cfg, {required String title, required String body, required bool isError}) async {
@@ -244,14 +320,48 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     return resolveOutputPath(name, dir.path);
   }
 
+  /// 归属地缓存文件路径（文档目录下 landing_geo_cache.json）。
+  Future<File> _geoCacheFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File('${dir.path}/landing_geo_cache.json');
+  }
+
+  /// 读取 IP → 国家码 归属地缓存。文件缺失/损坏时返回空表。
+  Future<Map<String, String>> _loadGeoCache() async {
+    try {
+      final f = await _geoCacheFile();
+      if (!f.existsSync()) return {};
+      final decoded = jsonDecode(await f.readAsString());
+      if (decoded is Map) {
+        return {
+          for (final e in decoded.entries)
+            if (e.value is String) e.key.toString(): e.value as String
+        };
+      }
+    } catch (_) {
+      // 缓存损坏时忽略，按空缓存处理
+    }
+    return {};
+  }
+
+  /// 写回 IP → 国家码 归属地缓存。失败静默（不影响主流程）。
+  Future<void> _saveGeoCache(Map<String, String> cache) async {
+    try {
+      final f = await _geoCacheFile();
+      await f.writeAsString(jsonEncode(cache));
+    } catch (_) {
+      // 写缓存失败不影响落地检测结果
+    }
+  }
+
   GithubPush? _github(AppConfig cfg) =>
       cfg.githubToken.isEmpty ? null : GithubPush(token: cfg.githubToken, repo: cfg.githubRepo, branch: cfg.githubBranch);
 
-  /// 手动推送单个产物文件到 GitHub（cf-ip 仓）。返回 (是否成功, HTTP码, 消息)。
+  /// 手动推送单个文件到 GitHub。返回 (是否成功, HTTP码, 消息)。
   /// 未配置 Token / 文件不存在时返回失败原因，不抛异常。
   Future<(bool, int, String)> pushFile(String file) async {
     if (!GithubPush.isPushable(file)) {
-      final m = '仅支持推送后缀为 _top.txt 的优选结果文件（当前：$file）';
+      final m = '仅支持推送后缀为 _top.txt 的落地结果文件（当前：$file）';
       ref.read(subLoggerProvider).warning(m);
       return (false, 0, m);
     }

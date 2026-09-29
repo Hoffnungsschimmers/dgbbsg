@@ -6,7 +6,7 @@ import '../net/ip.dart';
 
 /// 节点解析工具（对应旧版 fetcher 的解析函数）。
 ///
-/// 解析结果统一为 `ip:port#CC` 格式字符串，与旧版保持一致，便于后续探测/测速复用。
+/// 解析结果统一为 `ip:port#CC` 格式字符串，与旧版保持一致，便于后续探测复用。
 class NodeParser {
   final Map<String, String> cnToCode;
   final Map<String, String> alpha3ToAlpha2;
@@ -73,28 +73,50 @@ class NodeParser {
     return null;
   }
 
-  /// 从纯文本提取标准节点。
+  /// 把节点标签拆成「标准国家码 + 原始备注」。
+  ///
+  /// 备注 = 标签剥去行首国家码及其后分隔符之后的原文；标签不含国家码字面
+  /// （如 `美国`、`🇺🇸 洛杉矶`）时整串作为备注，国家码照常提取。
+  ({String? cc, String remark}) splitLabel(String label) {
+    final t = label.trim();
+    final cc = extractCountryCode(t);
+    if (cc == null) return (cc: null, remark: t);
+    if (t.toUpperCase() == cc) return (cc: cc, remark: '');
+    final stripped =
+        t.replaceFirst(RegExp('^$cc(?![A-Za-z])[-–—_/#@\\s]*', caseSensitive: false), '');
+    return (cc: cc, remark: stripped.trim());
+  }
+
+  /// 从纯文本提取标准节点，只保留 `ip:port#CC`（原始备注丢弃）。
   ///
   /// 兼容多种格式：
   /// - `ip:port#CC` / `ip#CC` / `domain:port#CC`
   /// - `ip`（无端口，默认 443）
-  /// - 测速结果格式 `ip [延迟 xx ms]` / `ip 延迟xxms` / `ip 12.3Mbps`（剥离注释取 IP）
+  /// - 旧优选结果格式 `ip:port#CC source 12.34 ms`（尾部延迟会被调用方剥离）
   /// - 区域优先格式 `HK [延迟 xx ms]`（无 IP，跳过）
   List<String> parseTextNodes(String text) {
     final nodes = <String>[];
-    // IPv4
-    final ipv4Re = RegExp(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?');
-    // IPv6 方括号格式: [2606:4700:52::1]:443
-    final ipv6Re = RegExp(r'\[([0-9a-fA-F:]+)\]:(\d{1,5})');
-    // 域名
-    final domainRe = RegExp(r'([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})(?::(\d{1,5}))?');
+    for (final e in parseTextNodesWithRemark(text)) {
+      // 有标签但提不出国家码的行按原行为丢弃。
+      if (e.cc.isEmpty && e.remark.isNotEmpty) continue;
+      nodes.add(e.cc.isEmpty ? e.ipPort : '${e.ipPort}#${e.cc}');
+    }
+    return nodes;
+  }
 
+  /// 从纯文本提取标准节点，并保留每行 `#` 之后的原始备注。
+  ///
+  /// 返回 `ipPort`（IPv6 已加方括号、端口缺省补 443）、`cc`（标准化国家码，
+  /// 无则空串）与 `remark`（标签剥掉国家码后的原文，无标签时为空串）。
+  /// 行格式兼容性同 [parseTextNodes]。
+  List<({String ipPort, String cc, String remark})> parseTextNodesWithRemark(String text) {
+    final out = <({String ipPort, String cc, String remark})>[];
     for (var token in text.split('\n')) {
       token = token.trim();
       if (token.isEmpty) continue;
       if (token.startsWith('#') || token.startsWith('//')) continue;
 
-      // 拆分标签（# 之后为注释）
+      // 拆分标签（# 之后为注释，多个 # 视为备注的一部分）
       String body = token;
       String label = '';
       if (token.contains('#')) {
@@ -103,47 +125,44 @@ class NodeParser {
         label = parts.sublist(1).join('#').trim();
       }
 
-      String? ipPort;
-
-      // 优先匹配 IPv6 方括号格式
-      final v6Match = ipv6Re.firstMatch(body);
-      if (v6Match != null) {
-        ipPort = '[${v6Match.group(1)}]:${v6Match.group(2)}';
-      } else {
-        // 裸 IPv6:port（如 2606:4700:...:443，无方括号）
-        final bareIpPort = _matchBareIpv6Port(body);
-        if (bareIpPort != null) {
-          ipPort = bareIpPort;
-        } else {
-          // 匹配 IPv4
-          final ipMatch = ipv4Re.firstMatch(body);
-          if (ipMatch != null) {
-            final ip = ipMatch.group(1)!;
-            final port = ipMatch.group(2);
-            ipPort = port != null ? '$ip:$port' : '$ip:443';
-          } else {
-            // 匹配域名
-            final dm = domainRe.firstMatch(body);
-            if (dm != null) {
-              final domain = dm.group(1)!;
-              final port = dm.group(2);
-              ipPort = port != null ? '$domain:$port' : '$domain:443';
-            }
-          }
-        }
-      }
+      final ipPort = _matchIpPort(body);
       if (ipPort == null) continue;
 
-      // 输出格式：ip:port#CC（标准化国家码）
-      if (label.isNotEmpty) {
-        final cc = extractCountryCode(label);
-        if (cc == null) continue; // 无有效国家码则跳过
-        nodes.add('$ipPort#$cc');
+      if (label.isEmpty) {
+        out.add((ipPort: ipPort, cc: '', remark: ''));
       } else {
-        nodes.add(ipPort);
+        final split = splitLabel(label);
+        out.add((ipPort: ipPort, cc: split.cc ?? '', remark: split.remark));
       }
     }
-    return nodes;
+    return out;
+  }
+
+  /// 从一行主体文本里提取 `ip:port`（IPv6 补方括号，端口缺省 443）。
+  /// 优先级：方括号 IPv6 → 裸 IPv6 → IPv4 → 域名。
+  String? _matchIpPort(String body) {
+    // IPv6 方括号格式: [2606:4700:52::1]:443
+    final v6Match = RegExp(r'\[([0-9a-fA-F:]+)\]:(\d{1,5})').firstMatch(body);
+    if (v6Match != null) return '[${v6Match.group(1)}]:${v6Match.group(2)}';
+
+    // 裸 IPv6:port（如 2606:4700:...:443，无方括号）
+    final bare = _matchBareIpv6Port(body);
+    if (bare != null) return bare;
+
+    final ipMatch =
+        RegExp(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d{1,5}))?').firstMatch(body);
+    if (ipMatch != null) {
+      final port = ipMatch.group(2);
+      return port != null ? '${ipMatch.group(1)}:$port' : '${ipMatch.group(1)}:443';
+    }
+
+    final dm = RegExp(r'([a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,})(?::(\d{1,5}))?')
+        .firstMatch(body);
+    if (dm != null) {
+      final port = dm.group(2);
+      return port != null ? '${dm.group(1)}:$port' : '${dm.group(1)}:443';
+    }
+    return null;
   }
 
   /// 裸 IPv6 主机判定（不含方括号、不以冒号开头/结尾、≥3 段或含 ::）。

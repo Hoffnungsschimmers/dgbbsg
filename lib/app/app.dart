@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,7 +8,6 @@ import '../features/subscriptions/config_tab.dart';
 import '../features/subscriptions/run_tab.dart';
 import '../features/subscriptions/subscriptions_state.dart';
 import '../features/webdav/webdav_sync_panel.dart';
-import '../main.dart' show systemTrayManager;
 import 'breakpoints.dart';
 import 'motion.dart';
 import 'providers.dart';
@@ -34,7 +31,6 @@ class AppShell extends ConsumerWidget {
     void nextTab() => switchTab((ref.read(tabProvider) + 1) % 4);
     void prevTab() => switchTab((ref.read(tabProvider) - 1 + 4) % 4);
     Future<void> refreshResults() async {
-      // 优先同步缓存，回退到仓库（等价 readLatestConfig，但这里的 ref 是 WidgetRef）
       var cfg = ref.read(latestConfigProvider);
       if (cfg == null) {
         cfg = (await ref.read(configRepositoryProvider.future)).current;
@@ -52,28 +48,24 @@ class AppShell extends ConsumerWidget {
             width: 28,
             height: 28,
             decoration: BoxDecoration(
-              color: AppTheme.edgeOrange,
+              gradient: t.accentGradient(),
               borderRadius: BorderRadius.circular(6),
             ),
             child: const Icon(Icons.cloud_outlined, color: Colors.white, size: 18),
           ),
           const SizedBox(width: 10),
           const Flexible(
-            child: Text('CF优选', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19), overflow: TextOverflow.ellipsis),
+            child: Text('CF优选',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19),
+                overflow: TextOverflow.ellipsis),
           ),
         ],
       ),
       actions: [
-        // Minimize to system tray (Windows / Linux only).
-        if (Platform.isWindows || Platform.isLinux)
-          IconButton(
-            icon: const Icon(Icons.minimize),
-            tooltip: '最小化到托盘',
-            onPressed: () => systemTrayManager.hideToTray(),
-          ),
+        // WebDAV 同步入口：直接打开同步面板（同步配置 / 同步结果 二选一）
         IconButton(
-          icon: const Icon(Icons.cloud_sync_outlined),
           tooltip: 'WebDAV 同步',
+          icon: const Icon(Icons.cloud_sync_outlined),
           onPressed: () => showWebDavSyncSheet(context, ref),
         ),
         IconButton(
@@ -99,16 +91,12 @@ class AppShell extends ConsumerWidget {
     Widget? bottomNav;
     Widget? sideRail;
 
-    // ── 中型及以上（>=600dp）→ NavigationRail ──
+    // ── 中型及以上（>=600dp）→ NavigationRail（桌面侧边栏）──
     if (formFactor != FormFactor.compact) {
       sideRail = NavigationRail(
         selectedIndex: tab,
         onDestinationSelected: switchTab,
         labelType: NavigationRailLabelType.all,
-        selectedIconTheme: IconThemeData(color: AppTheme.edgeOrange, size: 24),
-        unselectedIconTheme: IconThemeData(color: t.textDim),
-        selectedLabelTextStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.edgeOrange),
-        unselectedLabelTextStyle: TextStyle(fontSize: 13, color: t.textDim),
         destinations: const [
           NavigationRailDestination(icon: Icon(Icons.tune), label: Text('配置')),
           NavigationRailDestination(icon: Icon(Icons.play_arrow), label: Text('运行')),
@@ -118,7 +106,7 @@ class AppShell extends ConsumerWidget {
       );
       body = Expanded(child: _TabStack(tab: tab));
     } else {
-      // ── 紧凑（<600dp）→ 底部 NavigationBar ──
+      // ── 紧凑（<600dp）→ 底部 NavigationBar（手机底边栏）──
       bottomNav = SafeArea(
         top: false,
         child: NavigationBar(
@@ -161,10 +149,6 @@ class AppShell extends ConsumerWidget {
           ref.read(subProvider.notifier).runSubscription();
           return null;
         }),
-        RunLatencyIntent: CallbackAction<RunLatencyIntent>(onInvoke: (_) {
-          ref.read(subProvider.notifier).runLatency();
-          return null;
-        }),
         CancelRunIntent: CallbackAction<CancelRunIntent>(onInvoke: (_) {
           ref.read(subProvider.notifier).cancel();
           return null;
@@ -187,7 +171,7 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-/// Animated tab stack: holds four tabs (Config, Run, Results, Sync) with
+/// Animated tab stack: holds three tabs (Config, Run, Results) with
 /// slide + fade transitions on tab switch. All children stay alive via
 /// [AutomaticKeepAliveClientMixin].
 class _TabStack extends StatefulWidget {
@@ -214,8 +198,6 @@ class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixi
       ..addStatusListener(_onStatus);
     _curve = CurvedAnimation(parent: _ctrl, curve: Motion.curveStandard);
     _buildAnimations(0);
-    // 首帧直接处于动画完成态：否则当前 tab 透明度为 0，首页空白，
-    // 必须切换 tab（didUpdateWidget 里 forward）后才可见。
     _ctrl.value = 1.0;
   }
 
@@ -237,15 +219,14 @@ class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixi
   void _buildAnimations(int delta) {
     _oldFade = Tween(begin: 1.0, end: 0.0).animate(_curve);
     _newFade = Tween(begin: 0.0, end: 1.0).animate(_curve);
-    _newSlide = Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero)
-        .animate(_curve);
+    _newSlide =
+        Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero).animate(_curve);
   }
 
   @override
   void didUpdateWidget(covariant _TabStack old) {
     super.didUpdateWidget(old);
     if (old.tab != widget.tab) {
-      // If still animating a previous switch, snap it to end first.
       if (_animating) _ctrl.value = 1.0;
       _prevTab = old.tab;
       _animating = true;
@@ -260,16 +241,13 @@ class _TabStackState extends State<_TabStack> with SingleTickerProviderStateMixi
       children: [
         for (var i = 0; i < _children.length; i++)
           if (i == widget.tab)
-            // New tab: fade in + slide in.
             FadeTransition(
               opacity: _newFade,
               child: SlideTransition(position: _newSlide, child: _children[i]),
             )
           else if (i == _prevTab && _animating)
-            // Old tab: fade out (no slide, stays in place).
             FadeTransition(opacity: _oldFade, child: _children[i])
           else
-            // All other tabs: hidden but kept alive.
             Offstage(offstage: true, child: _children[i]),
       ],
     );

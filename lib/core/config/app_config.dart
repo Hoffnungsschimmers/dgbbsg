@@ -1,4 +1,4 @@
-/// 应用配置模型（仅保留「订阅转换 → 延迟优选 → 推送 GitHub」三步流程所需字段）。
+/// 应用配置模型（仅保留「订阅转换 → 落地检测 → 推送 GitHub」三步流程所需字段）。
 ///
 /// 普通 Dart class + 手写 fromJson/toJson，避免 codegen 复杂度。所有字段带默认值，
 /// 等价于旧版 Python config.Config 的 pydantic Field(default=...)。SharedPreferences
@@ -20,15 +20,10 @@ class AppConfig {
   final int subFetchMaxRetries;
   final double subFetchRetryDelay;
 
-  // ============ 延迟优选 ============
-  final int subLatencyMaxMs;
-  final int subLatencyTopN; // 按质量分保留前 N 名推送（0/负表示全部保留）
-  final String subLatencyOutputFile;
-  final double subLatencyTimeout;
-  final int subLatencyWorkers;
-  final int subLatencyProbes;
+  // ============ 落地检测与输出 ============
+  final String landingOutputFile; // 最终结果文件（落地检测写回 + 推送目标，默认 addressesapi_top.txt）
   final bool subInsecure; // 跳过订阅抓取时的 TLS 证书校验（默认 false，安全默认）
-  final double subLatencyMinSuccessRate; // TCP 探测成功率下限（0-1），低于则丢弃
+  final String landingProxy; // 落地检测专用代理（如 '127.0.0.1:7890'），为空则跟随系统代理
 
   // ============ GitHub 推送（独立 cf-ip 仓） ============
   final String githubToken;
@@ -38,7 +33,6 @@ class AppConfig {
   // ============ 自动更新 ============
   final bool subAutoUpdateEnabled;    // 是否启用自动更新
   final int subAutoUpdateIntervalMin; // 自动更新间隔（分钟），默认 60
-  final bool subAutoUpdateRunLatency; // 自动更新后是否自动运行延迟优选
 
   // ============ Webhook 通知 ============
   final String webhookUrl;        // Webhook URL (Telegram/Discord)
@@ -74,20 +68,14 @@ class AppConfig {
     this.subFetchConnectTimeout = 10,
     this.subFetchMaxRetries = 2,
     this.subFetchRetryDelay = 2.0,
-    this.subLatencyMaxMs = 300,
-    this.subLatencyTopN = 50,
-    this.subLatencyOutputFile = 'addressesapi_top.txt',
-    this.subLatencyTimeout = 3.0,
-    this.subLatencyWorkers = 50,
-    this.subLatencyProbes = 3,
+    this.landingOutputFile = 'addressesapi_top.txt',
     this.subInsecure = false,
-    this.subLatencyMinSuccessRate = 0.34,
+    this.landingProxy = '',
     this.githubToken = '',
     this.githubRepo = 'Hoffnungsschimmers/mnscn',
     this.githubBranch = 'main',
     this.subAutoUpdateEnabled = false,
     this.subAutoUpdateIntervalMin = 60,
-    this.subAutoUpdateRunLatency = false,
     this.webhookUrl = '',
     this.webhookType = 'none',
     this.webhookOnComplete = true,
@@ -139,20 +127,15 @@ class AppConfig {
       subFetchConnectTimeout: pick('SUB_FETCH_CONNECT_TIMEOUT', 10),
       subFetchMaxRetries: pick('SUB_FETCH_MAX_RETRIES', 2),
       subFetchRetryDelay: (pick('SUB_FETCH_RETRY_DELAY', 2.0) as num).toDouble(),
-      subLatencyMaxMs: pick('SUB_LATENCY_MAX_MS', 300),
-      subLatencyTopN: pick('SUB_LATENCY_TOP_N', 50),
-      subLatencyOutputFile: pick('SUB_LATENCY_OUTPUT_FILE', 'addressesapi_top.txt'),
-      subLatencyTimeout: (pick('SUB_LATENCY_TIMEOUT', 3.0) as num).toDouble(),
-      subLatencyWorkers: pick('SUB_LATENCY_WORKERS', 50),
-      subLatencyProbes: pick('SUB_LATENCY_PROBES', 3),
       subInsecure: pick('SUB_INSECURE', false),
-      subLatencyMinSuccessRate: (pick('SUB_LATENCY_MIN_SUCCESS_RATE', 0.34) as num).toDouble(),
+      // 新键优先；旧键 SUB_LATENCY_OUTPUT_FILE 兜底（延迟优选已移除，兼容历史配置）。
+      landingOutputFile: pick('LANDING_OUTPUT_FILE', pick('SUB_LATENCY_OUTPUT_FILE', 'addressesapi_top.txt')),
+      landingProxy: pick('LANDING_PROXY', ''),
       githubToken: pick('GITHUB_TOKEN', ''),
       githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/cf-ip'),
       githubBranch: pick('GITHUB_BRANCH', 'main'),
       subAutoUpdateEnabled: pick('SUB_AUTO_UPDATE_ENABLED', false),
       subAutoUpdateIntervalMin: pick('SUB_AUTO_UPDATE_INTERVAL_MIN', 60),
-      subAutoUpdateRunLatency: pick('SUB_AUTO_UPDATE_RUN_LATENCY', false),
       webhookUrl: pick('WEBHOOK_URL', ''),
       webhookType: pick('WEBHOOK_TYPE', 'none'),
       webhookOnComplete: pick('WEBHOOK_ON_COMPLETE', true),
@@ -182,19 +165,13 @@ class AppConfig {
         'SUB_FETCH_CONNECT_TIMEOUT': subFetchConnectTimeout,
         'SUB_FETCH_MAX_RETRIES': subFetchMaxRetries,
         'SUB_FETCH_RETRY_DELAY': subFetchRetryDelay,
-        'SUB_LATENCY_MAX_MS': subLatencyMaxMs,
-        'SUB_LATENCY_TOP_N': subLatencyTopN,
-        'SUB_LATENCY_OUTPUT_FILE': subLatencyOutputFile,
-        'SUB_LATENCY_TIMEOUT': subLatencyTimeout,
-        'SUB_LATENCY_WORKERS': subLatencyWorkers,
-        'SUB_LATENCY_PROBES': subLatencyProbes,
         'SUB_INSECURE': subInsecure,
-        'SUB_LATENCY_MIN_SUCCESS_RATE': subLatencyMinSuccessRate,
+        'LANDING_OUTPUT_FILE': landingOutputFile,
+        'LANDING_PROXY': landingProxy,
         'GITHUB_REPO': githubRepo,
         'GITHUB_BRANCH': githubBranch,
         'SUB_AUTO_UPDATE_ENABLED': subAutoUpdateEnabled,
         'SUB_AUTO_UPDATE_INTERVAL_MIN': subAutoUpdateIntervalMin,
-        'SUB_AUTO_UPDATE_RUN_LATENCY': subAutoUpdateRunLatency,
         'WEBHOOK_TYPE': webhookType,
         'WEBHOOK_ON_COMPLETE': webhookOnComplete,
         'WEBHOOK_ON_ERROR': webhookOnError,
@@ -221,20 +198,14 @@ class AppConfig {
     int? subFetchConnectTimeout,
     int? subFetchMaxRetries,
     double? subFetchRetryDelay,
-    int? subLatencyMaxMs,
-    int? subLatencyTopN,
-    String? subLatencyOutputFile,
-    double? subLatencyTimeout,
-    int? subLatencyWorkers,
-    int? subLatencyProbes,
+    String? landingOutputFile,
     bool? subInsecure,
-    double? subLatencyMinSuccessRate,
+    String? landingProxy,
     String? githubToken,
     String? githubRepo,
     String? githubBranch,
     bool? subAutoUpdateEnabled,
     int? subAutoUpdateIntervalMin,
-    bool? subAutoUpdateRunLatency,
     String? webhookUrl,
     String? webhookType,
     bool? webhookOnComplete,
@@ -262,20 +233,13 @@ class AppConfig {
       subFetchConnectTimeout: subFetchConnectTimeout ?? this.subFetchConnectTimeout,
       subFetchMaxRetries: subFetchMaxRetries ?? this.subFetchMaxRetries,
       subFetchRetryDelay: subFetchRetryDelay ?? this.subFetchRetryDelay,
-      subLatencyMaxMs: subLatencyMaxMs ?? this.subLatencyMaxMs,
-      subLatencyTopN: subLatencyTopN ?? this.subLatencyTopN,
-      subLatencyOutputFile: subLatencyOutputFile ?? this.subLatencyOutputFile,
-      subLatencyTimeout: subLatencyTimeout ?? this.subLatencyTimeout,
-      subLatencyWorkers: subLatencyWorkers ?? this.subLatencyWorkers,
-      subLatencyProbes: subLatencyProbes ?? this.subLatencyProbes,
+      landingOutputFile: landingOutputFile ?? this.landingOutputFile,
       subInsecure: subInsecure ?? this.subInsecure,
-      subLatencyMinSuccessRate: subLatencyMinSuccessRate ?? this.subLatencyMinSuccessRate,
       githubToken: githubToken ?? this.githubToken,
       githubRepo: githubRepo ?? this.githubRepo,
       githubBranch: githubBranch ?? this.githubBranch,
       subAutoUpdateEnabled: subAutoUpdateEnabled ?? this.subAutoUpdateEnabled,
       subAutoUpdateIntervalMin: subAutoUpdateIntervalMin ?? this.subAutoUpdateIntervalMin,
-      subAutoUpdateRunLatency: subAutoUpdateRunLatency ?? this.subAutoUpdateRunLatency,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       webhookType: webhookType ?? this.webhookType,
       webhookOnComplete: webhookOnComplete ?? this.webhookOnComplete,
@@ -286,6 +250,7 @@ class AppConfig {
       webdavAutoSync: webdavAutoSync ?? this.webdavAutoSync,
       webdavAutoSyncIntervalMin:
           webdavAutoSyncIntervalMin ?? this.webdavAutoSyncIntervalMin,
+      landingProxy: landingProxy ?? this.landingProxy,
       guiTheme: guiTheme ?? this.guiTheme,
       hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );
@@ -296,15 +261,6 @@ class AppConfig {
     final errors = <String>[];
     if (!['node', 'url', 'both'].contains(subInputMode)) {
       errors.add("SUB_INPUT_MODE 必须是 'node'、'url' 或 'both'");
-    }
-    if (subLatencyTimeout <= 0) {
-      errors.add('延迟探测超时必须为正数');
-    }
-    if (subLatencyWorkers < 1 || subLatencyWorkers > 500) {
-      errors.add('并发线程数必须在 1-500 之间');
-    }
-    if (subLatencyProbes < 1 || subLatencyProbes > 20) {
-      errors.add('探测次数必须在 1-20 之间');
     }
     if (subFetchTimeout < 1) {
       errors.add('订阅抓取超时必须 ≥ 1 秒');

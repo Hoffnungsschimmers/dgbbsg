@@ -26,8 +26,8 @@ class NotificationHelper {
 
   /// 显示系统通知。
   ///
-  /// [title] 通知标题（如「延迟优选完成」）。
-  /// [body] 通知正文（如「测试 120 / 连通 85 / 保留 50」）。
+  /// [title] 通知标题（如「落地检测完成」）。
+  /// [body] 通知正文（如「18/20 个 IP 已更新落地」）。
   /// [silent] 是否静音（默认 false，会播放系统提示音）。
   static Future<void> show({
     required String title,

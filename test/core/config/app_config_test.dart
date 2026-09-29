@@ -12,11 +12,8 @@ void main() {
       expect(c.subFetchRetryDelay, 2.0);
       expect(c.subNodeUuid, 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx');
       expect(c.subDefaultCountry, '');
-      expect(c.subLatencyProbes, 3);
-      expect(c.subLatencyTopN, 50);
-      expect(c.subLatencyOutputFile, 'addressesapi_top.txt');
+      expect(c.landingOutputFile, 'addressesapi_top.txt');
       expect(c.subInsecure, isFalse);
-      expect(c.subLatencyMinSuccessRate, 0.34);
       expect(c.githubRepo, 'Hoffnungsschimmers/mnscn');
     });
 
@@ -30,7 +27,20 @@ void main() {
       final round = AppConfig.fromJson(json);
       expect(round.subDisabledGenerators, c.subDisabledGenerators);
       expect(round.subGenerators, c.subGenerators);
-      expect(round.subLatencyProbes, c.subLatencyProbes);
+      expect(round.landingOutputFile, c.landingOutputFile);
+    });
+
+    test('landing output file migrates from legacy latency key', () {
+      // 旧配置只有 SUB_LATENCY_OUTPUT_FILE：兜底读取。
+      final legacy = AppConfig.fromJson({'SUB_LATENCY_OUTPUT_FILE': 'my_top.txt'});
+      expect(legacy.landingOutputFile, 'my_top.txt');
+      // 新键优先于旧键。
+      final both = AppConfig.fromJson({
+        'SUB_LATENCY_OUTPUT_FILE': 'old_top.txt',
+        'LANDING_OUTPUT_FILE': 'new_top.txt',
+      });
+      expect(both.landingOutputFile, 'new_top.txt');
+      expect(both.toJson()['LANDING_OUTPUT_FILE'], 'new_top.txt');
     });
 
     test('webdav fields roundtrip', () {
@@ -50,6 +60,15 @@ void main() {
       // 密码为敏感字段：不进 SharedPreferences JSON（经 SecureKV 存取）
       expect(json.containsKey('WEBDAV_PASSWORD'), isFalse);
       expect(round.webdavPassword, '');
+    });
+
+    test('landing proxy roundtrip', () {
+      const c = AppConfig(landingProxy: '127.0.0.1:7890');
+      final json = c.toJson();
+      expect(json['LANDING_PROXY'], '127.0.0.1:7890');
+      final round = AppConfig.fromJson(json);
+      expect(round.landingProxy, '127.0.0.1:7890');
+      expect(const AppConfig().landingProxy, '');
     });
   });
 
@@ -98,9 +117,9 @@ void main() {
   group('AppConfig.copyWith', () {
     test('updates single field without touching others', () {
       final c = const AppConfig();
-      final updated = c.copyWith(guiTheme: 'dark', subLatencyProbes: 5);
+      final updated = c.copyWith(guiTheme: 'dark', landingOutputFile: 'other_top.txt');
       expect(updated.guiTheme, 'dark');
-      expect(updated.subLatencyProbes, 5);
+      expect(updated.landingOutputFile, 'other_top.txt');
       expect(updated.subInputMode, c.subInputMode);
     });
   });

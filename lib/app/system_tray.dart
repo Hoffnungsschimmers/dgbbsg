@@ -21,7 +21,6 @@ class SystemTrayManager {
   Future<void> init({
     VoidCallback? onShow,
     VoidCallback? onRunSub,
-    VoidCallback? onRunLatency,
     VoidCallback? onQuit,
   }) async {
     final iconPath = await _extractIconToTemp();
@@ -43,10 +42,6 @@ class SystemTrayManager {
       MenuItemLabel(
         label: '运行订阅IP',
         onClicked: (_) => onRunSub?.call(),
-      ),
-      MenuItemLabel(
-        label: '运行延迟优选',
-        onClicked: (_) => onRunLatency?.call(),
       ),
       MenuSeparator(),
       MenuItemLabel(

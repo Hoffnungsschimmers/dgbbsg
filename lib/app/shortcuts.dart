@@ -28,10 +28,6 @@ class RunSubscriptionIntent extends Intent {
   const RunSubscriptionIntent();
 }
 
-class RunLatencyIntent extends Intent {
-  const RunLatencyIntent();
-}
-
 class CancelRunIntent extends Intent {
   const CancelRunIntent();
 }
@@ -56,7 +52,6 @@ Map<ShortcutActivator, Intent> buildAppShortcuts() {
 
     // 运行操作
     const SingleActivator(LogicalKeyboardKey.keyB, control: true): const RunSubscriptionIntent(),
-    const SingleActivator(LogicalKeyboardKey.keyT, control: true): const RunLatencyIntent(),
     const SingleActivator(LogicalKeyboardKey.period, control: true): const CancelRunIntent(),
   };
 }

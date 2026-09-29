@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/config/app_config.dart';
+import '../../core/subscription/sub_parser.dart' show supportedSchemes;
 import '../widgets/common.dart';
 
 class ConfigTab extends ConsumerStatefulWidget {
@@ -22,8 +23,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   final _uuidFocus = FocusNode();
   final _countryCtl = TextEditingController();
   final _countryFocus = FocusNode();
-  final _latencyOutCtl = TextEditingController();
-  final _latencyOutFocus = FocusNode();
+  final _landingOutCtl = TextEditingController();
+  final _landingOutFocus = FocusNode();
   final _tokenCtl = TextEditingController();
   final _tokenFocus = FocusNode();
   final _repoCtl = TextEditingController();
@@ -38,6 +39,10 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   final _wdPassFocus = FocusNode();
   final _wdIntervalCtl = TextEditingController();
   final _wdIntervalFocus = FocusNode();
+  final _webhookUrlCtl = TextEditingController();
+  final _webhookUrlFocus = FocusNode();
+  final _landingProxyCtl = TextEditingController();
+  final _landingProxyFocus = FocusNode();
 
   Timer? _saveTimer;
   AppConfig? _pendingCfg;
@@ -49,13 +54,20 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   @override
   void initState() {
     super.initState();
+    // fireImmediately：配置可能在本页挂载前就已解析完（主窗口先读过），
+    // 此时不补发当前值会让所有输入框停在空状态。
     ref.listenManual(configProvider, (_, next) {
       next.whenData((cfg) {
         _syncControllers(cfg);
         // 启动时初始化 latestConfigProvider，确保运行时读到正确配置。
-        ref.read(latestConfigProvider.notifier).state ??= cfg;
+        // fireImmediately 时回调发生在 initState 内，改 provider 必须推到帧后。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ref.read(latestConfigProvider.notifier).state ??= cfg;
+          }
+        });
       });
-    });
+    }, fireImmediately: true);
   }
 
   @override
@@ -66,8 +78,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _uuidFocus.dispose();
     _countryCtl.dispose();
     _countryFocus.dispose();
-    _latencyOutCtl.dispose();
-    _latencyOutFocus.dispose();
+    _landingOutCtl.dispose();
+    _landingOutFocus.dispose();
     _tokenCtl.dispose();
     _tokenFocus.dispose();
     _repoCtl.dispose();
@@ -82,6 +94,10 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _wdPassFocus.dispose();
     _wdIntervalCtl.dispose();
     _wdIntervalFocus.dispose();
+    _webhookUrlCtl.dispose();
+    _webhookUrlFocus.dispose();
+    _landingProxyCtl.dispose();
+    _landingProxyFocus.dispose();
     _saveTimer?.cancel();
     super.dispose();
   }
@@ -110,7 +126,9 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _syncIf(_wdUserCtl, _wdUserFocus, cfg.webdavUser);
     _syncIf(_wdPassCtl, _wdPassFocus, cfg.webdavPassword);
     _syncIf(_wdIntervalCtl, _wdIntervalFocus, cfg.webdavAutoSyncIntervalMin.toString());
-    _syncIf(_latencyOutCtl, _latencyOutFocus, cfg.subLatencyOutputFile);
+    _syncIf(_webhookUrlCtl, _webhookUrlFocus, cfg.webhookUrl);
+    _syncIf(_landingProxyCtl, _landingProxyFocus, cfg.landingProxy);
+    _syncIf(_landingOutCtl, _landingOutFocus, cfg.landingOutputFile);
     _isSyncing = false;
   }
 
@@ -151,6 +169,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       error: (e, _) => Center(child: Text('加载失败: $e')),
       data: (cfg) {
         final validationErrors = cfg.validate();
+        final t = AppThemeExt.of(context);
         return Column(
           children: [
             if (validationErrors.isNotEmpty)
@@ -177,14 +196,31 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // 自动保存提示（轻量，不打扰）
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.autorenew, size: 13, color: t.textDim),
+                          const SizedBox(width: 6),
+                          Text('所有修改自动保存，无需手动保存',
+                              style: TextStyle(fontSize: 12, color: t.textDim)),
+                        ],
+                      ),
+                    ),
                     _buildSubscriptionInput(context, cfg),
+                    const SizedBox(height: 12),
+                    _buildNodeParamsSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildFetchSection(context, cfg),
                     const SizedBox(height: 12),
-                    _buildGitHubSection(context, cfg),
-                    _buildWebDavSection(context, cfg),
+                    _buildLandingSection(context, cfg),
                     const SizedBox(height: 12),
-                    _buildAppearanceSection(context, cfg),
+                    _buildWebhookSection(context, cfg),
+                    const SizedBox(height: 12),
+                    _buildGitHubSection(context, cfg),
+                    const SizedBox(height: 14),
+                    _buildWebDavSection(context, cfg),
                   ],
                 ),
               ),
@@ -241,11 +277,18 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             _buildUrlList(context, cfg),
             const SizedBox(height: 16),
           ],
-
-          // 节点参数（紧凑网格布局）
-          _buildNodeParams(context, cfg),
         ],
       ),
+    );
+  }
+
+  /// ② 节点参数（独立折叠组）。
+  Widget _buildNodeParamsSection(BuildContext context, AppConfig cfg) {
+    return SectionCollapsible(
+      title: '节点参数',
+      icon: Icons.settings_ethernet,
+      initiallyExpanded: true,
+      child: _buildNodeParams(context, cfg),
     );
   }
 
@@ -304,8 +347,10 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
               value: _genHost(cfg.subGenerators[i]),
               secret: _genSecret(cfg.subGenerators[i]),
               onSave: (note, value, secret) {
+                // 备注为空时回退用域名，保证 `名称|域名` 格式不断裂。
+                final name = note.isEmpty ? value : note;
                 final list = [...cfg.subGenerators];
-                list[i] = secret.isNotEmpty ? '$note|$value|$secret' : '$note|$value';
+                list[i] = secret.isNotEmpty ? '$name|$value|$secret' : '$name|$value';
                 _save(cfg.copyWith(subGenerators: list));
               },
             ),
@@ -335,8 +380,9 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                 showSecret: true,
                 secretLabel: '密钥（可选）',
                 onSave: (note, value, secret) {
+                  final name = note.isEmpty ? value : note;
                   final entry =
-                      secret.isNotEmpty ? '$note|$value|$secret' : '$note|$value';
+                      secret.isNotEmpty ? '$name|$value|$secret' : '$name|$value';
                   _save(cfg.copyWith(subGenerators: [...cfg.subGenerators, entry]));
                 },
               ),
@@ -646,7 +692,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   AppToast.show(ctx, '$valueLabel 不能为空', success: false);
                   return;
                 }
-                onSave(n.isEmpty ? v : n, v, s);
+                onSave(n, v, s);
                 Navigator.pop(ctx);
               },
               child: const Text('保存'),
@@ -672,10 +718,14 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     return parts.length > 2 ? parts.sublist(2).join('|').trim() : '';
   }
 
-  /// 订阅链接：备注 = 第一个 | 段（vless/vmess 链接不带备注）
+  /// 订阅链接：备注 = 第一个 | 段。
+  /// 节点分享链接（vless/vmess/trojan/ss/ssr/hysteria2/hy2/tuic）本身不带
+  /// 「备注|」前缀；只有 http(s) 订阅地址支持标签前缀。
+  /// 用 supportedSchemes 精确判断，避免把含 "://" 的备注误判为节点链接
+  /// （如 "备注A|https://…" 含 :// 但仍是带标签的订阅地址）。
   String _urlNote(String url) {
     final u = url.trim();
-    if (u.startsWith('vless://') || u.startsWith('vmess://')) return '';
+    if (supportedSchemes.any((s) => u.startsWith(s))) return '';
     final pipeIdx = u.indexOf('|');
     if (pipeIdx > 0) return u.substring(0, pipeIdx).trim();
     return '';
@@ -684,7 +734,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   /// 订阅链接：实际链接 = | 之后部分（无 | 则整体）
   String _urlValue(String url) {
     final u = url.trim();
-    if (u.startsWith('vless://') || u.startsWith('vmess://')) return u;
+    if (supportedSchemes.any((s) => u.startsWith(s))) return u;
     final pipeIdx = u.indexOf('|');
     if (pipeIdx > 0) {
       final after = u.substring(pipeIdx + 1).trim();
@@ -693,10 +743,10 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     return u;
   }
 
-  /// 备注 + 链接 拼回存储格式（vless/vmess 不拼备注）
+  /// 备注 + 链接 拼回存储格式（节点分享链接不拼备注）
   String _joinNoteValue(String note, String value) {
     final v = value.trim();
-    if (v.startsWith('vless://') || v.startsWith('vmess://')) return v;
+    if (supportedSchemes.any((s) => v.startsWith(s))) return v;
     final n = note.trim();
     return n.isEmpty ? v : '$n|$v';
   }
@@ -719,21 +769,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
-  /// 节点参数：宽屏 2 列网格，窄屏（手机）单列全宽。
+  /// 节点参数内容：宽屏 2 列网格，窄屏（手机）单列全宽。
   Widget _buildNodeParams(BuildContext context, AppConfig cfg) {
     final t = AppThemeExt.of(context);
     final wide = MediaQuery.sizeOf(context).width >= 600;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Icon(Icons.settings_ethernet, size: 16, color: AppTheme.edgeOrange),
-            const SizedBox(width: 6),
-            Text('节点参数', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.text)),
-          ],
-        ),
-        const SizedBox(height: 10),
         // 宽屏 2 列 / 窄屏单列
         if (wide)
           Row(
@@ -744,7 +786,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   label: 'Host',
                   controller: _hostCtl,
                   focusNode: _hostFocus,
-                  onChanged: (v) => _save(cfg.copyWith(subNodeHost: v)),
+                  onChanged: (v) => _save(cfg.copyWith(subNodeHost: v.trim())),
                 ),
               ),
               const SizedBox(width: 12),
@@ -753,7 +795,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   label: 'UUID',
                   controller: _uuidCtl,
                   focusNode: _uuidFocus,
-                  onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v)),
+                  onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v.trim())),
                 ),
               ),
             ],
@@ -763,14 +805,14 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             label: 'Host',
             controller: _hostCtl,
             focusNode: _hostFocus,
-            onChanged: (v) => _save(cfg.copyWith(subNodeHost: v)),
+            onChanged: (v) => _save(cfg.copyWith(subNodeHost: v.trim())),
           ),
           const SizedBox(height: 12),
           _compactTextField(
             label: 'UUID',
             controller: _uuidCtl,
             focusNode: _uuidFocus,
-            onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v)),
+            onChanged: (v) => _save(cfg.copyWith(subNodeUuid: v.trim())),
           ),
         ],
         const SizedBox(height: 12),
@@ -783,17 +825,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   label: '默认国家码',
                   controller: _countryCtl,
                   focusNode: _countryFocus,
-                  onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.toUpperCase())),
+                  onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.trim().toUpperCase())),
                   hint: '留空=不设',
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _compactTextField(
-                  label: '输出文件名',
-                  controller: _latencyOutCtl,
-                  focusNode: _latencyOutFocus,
-                  onChanged: (v) => _save(cfg.copyWith(subLatencyOutputFile: v)),
+                  label: '落地/推送文件名',
+                  controller: _landingOutCtl,
+                  focusNode: _landingOutFocus,
+                  onChanged: (v) => _save(cfg.copyWith(landingOutputFile: v)),
                 ),
               ),
             ],
@@ -803,15 +845,15 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             label: '默认国家码',
             controller: _countryCtl,
             focusNode: _countryFocus,
-            onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.toUpperCase())),
+            onChanged: (v) => _save(cfg.copyWith(subDefaultCountry: v.trim().toUpperCase())),
             hint: '留空=不设',
           ),
           const SizedBox(height: 12),
           _compactTextField(
-            label: '输出文件名',
-            controller: _latencyOutCtl,
-            focusNode: _latencyOutFocus,
-            onChanged: (v) => _save(cfg.copyWith(subLatencyOutputFile: v)),
+            label: '落地/推送文件名',
+            controller: _landingOutCtl,
+            focusNode: _landingOutFocus,
+            onChanged: (v) => _save(cfg.copyWith(landingOutputFile: v)),
           ),
         ],
         const SizedBox(height: 12),
@@ -948,7 +990,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     return SectionCollapsible(
       title: '订阅抓取',
       icon: Icons.cloud_sync,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -957,13 +999,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             children: [
               Expanded(
                 child: labeledSliderCountUp(context, '连接超时 (秒)',
-                    cfg.subFetchConnectTimeout.toDouble(), 1, 30,
+                    cfg.subFetchConnectTimeout.toDouble(), 3, 30,
                     (v) => _save(cfg.copyWith(subFetchConnectTimeout: v.round()))),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: labeledSliderCountUp(context, '总超时 (秒)',
-                    cfg.subFetchTimeout.toDouble(), 5, 60,
+                    cfg.subFetchTimeout.toDouble(), 5, 120,
                     (v) => _save(cfg.copyWith(subFetchTimeout: v.round()))),
               ),
             ],
@@ -979,7 +1021,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
               const SizedBox(width: 16),
               Expanded(
                 child: labeledDoubleSliderCountUp(context, '重试间隔 (秒)',
-                    cfg.subFetchRetryDelay, 0.1, 10,
+                    cfg.subFetchRetryDelay, 0.5, 10,
                     (v) => _save(cfg.copyWith(subFetchRetryDelay: v))),
               ),
             ],
@@ -1011,6 +1053,37 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
+  // ═══════════════════════════════════════════════════════
+  // ③ 落地检测
+  // ═══════════════════════════════════════════════════════
+
+  /// 落地检测参数：代理设置。字段直连 [AppConfig]，与 subscriptions_state.runLandingCheck 的读取一致。
+  Widget _buildLandingSection(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
+    return SectionCollapsible(
+      title: '落地检测',
+      icon: Icons.public,
+      initiallyExpanded: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _compactTextField(
+            label: '落地检测代理（开代理测落地时用，空=跟随系统代理）',
+            controller: _landingProxyCtl,
+            focusNode: _landingProxyFocus,
+            onChanged: (v) => _save(cfg.copyWith(landingProxy: v.trim())),
+            hint: '127.0.0.1:7890',
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '运行页「代理测落地」经此代理检测，「直连测落地」强制直连。',
+            style: TextStyle(fontSize: 12, color: t.textDim),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAutoUpdate(BuildContext context, AppConfig cfg) {
     final t = AppThemeExt.of(context);
     return Container(
@@ -1025,7 +1098,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             type: MaterialType.transparency,
             child: SwitchListTile(
               title: Text('定时自动更新', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.text)),
-              subtitle: Text('按间隔自动抓取订阅并优选', style: TextStyle(fontSize: 12, color: t.textDim)),
+              subtitle: Text('按间隔自动抓取订阅', style: TextStyle(fontSize: 12, color: t.textDim)),
               value: cfg.subAutoUpdateEnabled,
               onChanged: (v) => _save(cfg.copyWith(subAutoUpdateEnabled: v)),
               activeThumbColor: AppTheme.edgeOrange,
@@ -1038,20 +1111,9 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: labeledSliderCountUp(context, '更新间隔（分钟）',
-                  cfg.subAutoUpdateIntervalMin.toDouble(), 5, 480,
+                  cfg.subAutoUpdateIntervalMin.toDouble(), 10, 720,
                   (v) => _save(cfg.copyWith(subAutoUpdateIntervalMin: v.round())),
                   suffix: ' 分钟'),
-            ),
-            Material(
-              type: MaterialType.transparency,
-              child: SwitchListTile(
-                title: Text('更新后自动运行延迟优选', style: TextStyle(fontSize: 13, color: t.text)),
-                value: cfg.subAutoUpdateRunLatency,
-                onChanged: (v) => _save(cfg.copyWith(subAutoUpdateRunLatency: v)),
-                activeThumbColor: AppTheme.edgeOrange,
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-              ),
             ),
           ],
         ],
@@ -1068,7 +1130,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     return SectionCollapsible(
       title: 'GitHub 推送',
       icon: Icons.cloud_upload,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1076,7 +1138,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             label: 'Token',
             controller: _tokenCtl,
             focusNode: _tokenFocus,
-            onChanged: (v) => _save(cfg.copyWith(githubToken: v)),
+            onChanged: (v) => _save(cfg.copyWith(githubToken: v.trim())),
             obscure: true,
           ),
           const SizedBox(height: 12),
@@ -1090,7 +1152,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                     label: '仓库 (owner/repo)',
                     controller: _repoCtl,
                     focusNode: _repoFocus,
-                    onChanged: (v) => _save(cfg.copyWith(githubRepo: v)),
+                    onChanged: (v) => _save(cfg.copyWith(githubRepo: v.trim())),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1099,7 +1161,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                     label: '分支',
                     controller: _branchCtl,
                     focusNode: _branchFocus,
-                    onChanged: (v) => _save(cfg.copyWith(githubBranch: v)),
+                    onChanged: (v) => _save(cfg.copyWith(githubBranch: v.trim())),
                   ),
                 ),
               ],
@@ -1109,14 +1171,80 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
               label: '仓库 (owner/repo)',
               controller: _repoCtl,
               focusNode: _repoFocus,
-              onChanged: (v) => _save(cfg.copyWith(githubRepo: v)),
+              onChanged: (v) => _save(cfg.copyWith(githubRepo: v.trim())),
             ),
             const SizedBox(height: 12),
             _compactTextField(
               label: '分支',
               controller: _branchCtl,
               focusNode: _branchFocus,
-              onChanged: (v) => _save(cfg.copyWith(githubBranch: v)),
+              onChanged: (v) => _save(cfg.copyWith(githubBranch: v.trim())),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // ④ Webhook 通知
+  // ═══════════════════════════════════════════════════════
+
+  /// Webhook 通知：类型选择 + URL + 完成/失败开关。
+  /// 与 _notifyWebhook 的读取一致：type=none 或 URL 为空时不发送。
+  Widget _buildWebhookSection(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
+    return SectionCollapsible(
+      title: 'Webhook 通知',
+      icon: Icons.notifications_outlined,
+      initiallyExpanded: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (value, label) in const [
+                ('none', '关闭'),
+                ('telegram', 'Telegram'),
+                ('discord', 'Discord'),
+              ])
+                ChoiceChip(
+                  label: Text(label, style: const TextStyle(fontSize: 14)),
+                  selected: cfg.webhookType == value,
+                  showCheckmark: false,
+                  selectedColor: AppTheme.edgeOrange.withValues(alpha: 0.2),
+                  side: BorderSide(color: t.border),
+                  onSelected: (_) => _save(cfg.copyWith(webhookType: value)),
+                ),
+            ],
+          ),
+          if (cfg.webhookType != 'none') ...[
+            const SizedBox(height: 12),
+            _compactTextField(
+              label: cfg.webhookType == 'telegram' ? 'Bot 地址（…/sendMessage?chat_id=…）' : 'Webhook 地址',
+              controller: _webhookUrlCtl,
+              focusNode: _webhookUrlFocus,
+              onChanged: (v) => _save(cfg.copyWith(webhookUrl: v.trim())),
+              hint: 'https://…',
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              title: Text('任务完成时通知', style: TextStyle(fontSize: 13, color: t.text)),
+              value: cfg.webhookOnComplete,
+              onChanged: (v) => _save(cfg.copyWith(webhookOnComplete: v)),
+              activeThumbColor: AppTheme.edgeOrange,
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+            SwitchListTile(
+              title: Text('任务失败时通知', style: TextStyle(fontSize: 13, color: t.text)),
+              value: cfg.webhookOnError,
+              onChanged: (v) => _save(cfg.copyWith(webhookOnError: v)),
+              activeThumbColor: AppTheme.edgeOrange,
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 4),
             ),
           ],
         ],
@@ -1133,7 +1261,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     return SectionCollapsible(
       title: 'WebDAV 同步',
       icon: Icons.cloud_sync_outlined,
-      initiallyExpanded: false,
+      initiallyExpanded: true,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1146,7 +1274,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             label: '服务器地址',
             controller: _wdUrlCtl,
             focusNode: _wdUrlFocus,
-            onChanged: (v) => _save(cfg.copyWith(webdavUrl: v)),
+            onChanged: (v) => _save(cfg.copyWith(webdavUrl: v.trim())),
             hint: 'https://dav.jianguoyun.com/dav',
           ),
           const SizedBox(height: 12),
@@ -1154,7 +1282,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             label: '账号',
             controller: _wdUserCtl,
             focusNode: _wdUserFocus,
-            onChanged: (v) => _save(cfg.copyWith(webdavUser: v)),
+            onChanged: (v) => _save(cfg.copyWith(webdavUser: v.trim())),
           ),
           const SizedBox(height: 12),
           _compactTextField(
@@ -1182,37 +1310,11 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
               child: labeledSliderCountUp(context, '自动同步间隔（分钟）',
-                  cfg.webdavAutoSyncIntervalMin.toDouble(), 5, 480,
+                  cfg.webdavAutoSyncIntervalMin.toDouble(), 10, 720,
                   (v) => _save(cfg.copyWith(webdavAutoSyncIntervalMin: v.round())),
                   suffix: ' 分钟'),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // ④ 外观
-  // ═══════════════════════════════════════════════════════
-
-  Widget _buildAppearanceSection(BuildContext context, AppConfig cfg) {
-    return SectionCollapsible(
-      title: '外观',
-      icon: Icons.palette_outlined,
-      initiallyExpanded: false,
-      child: SegmentedButton<ThemeMode>(
-        selected: {ref.watch(themeModeProvider)},
-        onSelectionChanged: (s) {
-          final mode = s.first;
-          ref.read(themeModeProvider.notifier).state = mode;
-          final themeStr = mode == ThemeMode.dark ? 'dark' : mode == ThemeMode.light ? 'light' : 'system';
-          _save(cfg.copyWith(guiTheme: themeStr));
-        },
-        segments: const [
-          ButtonSegment(value: ThemeMode.system, icon: Icon(Icons.brightness_auto, size: 16), label: Text('跟随系统')),
-          ButtonSegment(value: ThemeMode.light, icon: Icon(Icons.light_mode, size: 16), label: Text('浅色')),
-          ButtonSegment(value: ThemeMode.dark, icon: Icon(Icons.dark_mode, size: 16), label: Text('深色')),
         ],
       ),
     );

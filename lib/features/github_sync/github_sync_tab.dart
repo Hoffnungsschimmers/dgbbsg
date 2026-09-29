@@ -6,10 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/motion.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
-import '../../core/latency/latency_prober.dart';
+import '../../core/net/endpoint.dart';
 import '../results/result_state.dart';
 import '../results/results_table.dart';
 import '../widgets/common.dart';
+import '../widgets/toast.dart';
 import 'github_sync_state.dart';
 
 class GithubSyncTab extends ConsumerStatefulWidget {
@@ -48,6 +49,40 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
     return sb.toString();
   }
 
+  /// 右上角 IP 数量小框（圆角方框，与标题区其他样式区分）。
+  Widget _ipCountBox(BuildContext context, int count) {
+    final t = AppThemeExt.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: t.accentGradient(),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.cloud_outlined, size: 16, color: Colors.white),
+          const SizedBox(width: 8),
+          Text(
+            '$count',
+            style: const TextStyle(
+                color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800, fontFamily: 'AppMono'),
+          ),
+          const SizedBox(width: 2),
+          const Text('IP', style: TextStyle(color: Colors.white70, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  /// ISO8601 → "MM-dd HH:mm"（本地时间）。
+  String _formatTime(String iso) {
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return iso;
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
   void _toggleRawView(bool toRaw) {
     if (toRaw) {
       final rows = ref.read(githubSyncProvider).remoteNodes;
@@ -67,18 +102,7 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
           cmp = a.ipPort.compareTo(b.ipPort);
           break;
         case 1:
-          final la = parseLatency(a.latency);
-          final lb = parseLatency(b.latency);
-          if (la == null && lb == null) return 0;
-          if (la == null) return 1;
-          if (lb == null) return -1;
-          cmp = la.compareTo(lb);
-          break;
-        case 2:
-          cmp = a.country.compareTo(b.country);
-          break;
-        case 3:
-          cmp = a.source.compareTo(b.source);
+          cmp = a.annotation.compareTo(b.annotation);
           break;
         default:
           cmp = 0;
@@ -91,7 +115,6 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
   void _showEditDialog(int originalIndex, ResultRow row) {
     final ipPortCtl = TextEditingController(text: row.ipPort);
     final sourceCtl = TextEditingController(text: row.source);
-    final latencyCtl = TextEditingController(text: row.latency ?? '');
 
     showDialog<void>(
       context: context,
@@ -122,17 +145,6 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: latencyCtl,
-                style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
-                decoration: InputDecoration(
-                  labelText: '延迟（如 50.00 ms）',
-                  isDense: true,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-              ),
             ],
           ),
           actions: [
@@ -144,15 +156,13 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
               onPressed: () {
                 final ipPort = ipPortCtl.text.trim();
                 final source = sourceCtl.text.trim();
-                final latency = latencyCtl.text.trim();
                 if (ipPort.isNotEmpty) {
                   final cc = nodeCountry(row.node);
                   final ccPart = cc.isNotEmpty ? '#$cc' : '';
                   final srcPart = source.isNotEmpty ? ' $source' : '';
                   final newNode = '$ipPort$ccPart$srcPart';
-                  ref.read(githubSyncProvider.notifier).updateRemoteNode(
-                      originalIndex, newNode,
-                      latency: latency.isNotEmpty ? latency : null);
+                  ref.read(githubSyncProvider.notifier)
+                      .updateRemoteNode(originalIndex, newNode);
                 }
                 Navigator.pop(ctx);
               },
@@ -200,31 +210,72 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── 标题行：标题 + 信息 pills ──
-                  Row(
-                    children: [
-                      Text('GitHub 同步',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 20,
-                              )),
-                      if (syncState.remoteFile != null) ...[
-                        const SizedBox(width: 10),
-                        pill(context, syncState.remoteFile!, t.surfaceHover),
+                  // ── 标题行：标题 + 远程文件/时间 pills；IP 数量放右上角（窄屏自动换行）──
+                  LayoutBuilder(builder: (ctx, c) {
+                    final narrow = MediaQuery.sizeOf(context).width < 600;
+                    if (narrow) {
+                      // 窄屏：标题 + IP 框一行，文件/时间 pill 换行在下方
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text('GitHub 同步',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 20,
+                                        )),
+                              ),
+                              const Spacer(),
+                              if (rows.isNotEmpty) _ipCountBox(context, rows.length),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (syncState.remoteFile != null)
+                                pill(context, syncState.remoteFile!, t.surfaceHover),
+                              if (syncState.remoteUpdatedAt != null)
+                                pillWithIcon(
+                                  context,
+                                  icon: Icons.schedule,
+                                  text: _formatTime(syncState.remoteUpdatedAt!),
+                                  bg: t.surfaceHover,
+                                ),
+                            ],
+                          ),
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Text('GitHub 同步',
+                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 20,
+                                )),
+                        if (syncState.remoteFile != null) ...[
+                          const SizedBox(width: 10),
+                          pill(context, syncState.remoteFile!, t.surfaceHover),
+                        ],
+                        if (syncState.remoteUpdatedAt != null) ...[
+                          const SizedBox(width: 10),
+                          pillWithIcon(
+                            context,
+                            icon: Icons.schedule,
+                            text: _formatTime(syncState.remoteUpdatedAt!),
+                            bg: t.surfaceHover,
+                          ),
+                        ],
+                        const Spacer(),
+                        if (rows.isNotEmpty) _ipCountBox(context, rows.length),
                       ],
-                      if (rows.isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        pill(context, '${rows.length} IP', t.surfaceHover),
-                      ],
-                      if (syncState.searchQuery.isNotEmpty) ...[
-                        const SizedBox(width: 10),
-                        Text(
-                          '${syncState.filteredRemoteNodes.length}/${rows.length}',
-                          style: TextStyle(color: AppTheme.edgeOrange, fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ],
-                  ),
+                    );
+                  }),
                   const SizedBox(height: 14),
 
                   // ── 操作行：视图切换 + 按钮 ──
@@ -237,9 +288,18 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                       FilledButton.icon(
                         onPressed: syncState.loading
                             ? null
-                            : () => ref
-                                .read(githubSyncProvider.notifier)
-                                .pullFromGithub(),
+                            : () async {
+                                await ref
+                                    .read(githubSyncProvider.notifier)
+                                    .pullFromGithub();
+                                if (!mounted) return;
+                                final s = ref.read(githubSyncProvider);
+                                if (s.error != null) {
+                                  AppToast.show(context, s.error!, success: false);
+                                } else if (s.message != null) {
+                                  AppToast.show(context, s.message!);
+                                }
+                              },
                         icon: syncState.loading
                             ? const SizedBox(
                                 width: 16,
@@ -268,14 +328,17 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                             Padding(padding: EdgeInsets.symmetric(horizontal: 10), child: Text('原始', style: TextStyle(fontSize: 13))),
                           ],
                         ),
-                        // 编辑
-                        IconButton.filledTonal(
-                          icon: Icon(ref.watch(editModeProvider) ? Icons.edit_off : Icons.edit, size: 18),
-                          tooltip: ref.watch(editModeProvider) ? '退出编辑' : '编辑',
-                          iconSize: 18,
-                          visualDensity: VisualDensity.compact,
+                        // 编辑（切换可编辑模式）
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: ref.watch(editModeProvider) ? t.accent : t.textDim,
+                            side: BorderSide(color: ref.watch(editModeProvider) ? t.accent : t.border),
+                            visualDensity: VisualDensity.compact,
+                          ),
                           onPressed: () =>
                               ref.read(editModeProvider.notifier).state = !ref.read(editModeProvider),
+                          icon: Icon(ref.watch(editModeProvider) ? Icons.check : Icons.edit, size: 16),
+                          label: Text(ref.watch(editModeProvider) ? '完成' : '编辑', style: const TextStyle(fontSize: 13)),
                         ),
                         // 去重
                         OutlinedButton.icon(
@@ -438,7 +501,7 @@ class _GithubSyncTabState extends ConsumerState<GithubSyncTab>
                               style: const TextStyle(
                                   fontFamily: 'AppMono', fontSize: 13),
                               decoration: InputDecoration(
-                                hintText: 'ip:port#CC source',
+                                hintText: 'ip:port#CC 来源 备注',
                                 hintStyle: TextStyle(color: t.textDim, fontSize: 13),
                                 isDense: true,
                                 contentPadding: const EdgeInsets.symmetric(

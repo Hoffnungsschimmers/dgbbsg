@@ -23,14 +23,14 @@ class WebDavSync {
     return m;
   }
 
-  /// 参与同步的结果文件集合：两个输出文件 + 当前结果文件，各带 .json 旁文件。
+  /// 参与同步的结果文件集合：订阅输出 + 落地输出 + 当前结果文件，各带 .json 旁文件。
   static List<String> resultFileNames(AppConfig cfg, String? currentFile) {
     final names = <String>{};
     if (cfg.subOutputFile.trim().isNotEmpty) {
       names.add(cfg.subOutputFile.trim().split(RegExp(r'[\\/]')).last);
     }
-    if (cfg.subLatencyOutputFile.trim().isNotEmpty) {
-      names.add(cfg.subLatencyOutputFile.trim().split(RegExp(r'[\\/]')).last);
+    if (cfg.landingOutputFile.trim().isNotEmpty) {
+      names.add(cfg.landingOutputFile.trim().split(RegExp(r'[\\/]')).last);
     }
     if (currentFile != null && currentFile.trim().isNotEmpty) {
       names.add(currentFile.trim().split(RegExp(r'[\\/]')).last);

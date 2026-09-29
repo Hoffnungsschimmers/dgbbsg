@@ -17,8 +17,8 @@ class _SafeSubNotifier extends SubscriptionsNotifier {
   _SafeSubNotifier(super.ref);
 
   @override
+  // ignore: must_call_super  // 诊断落在方法声明行，注释必须紧贴它
   void dispose() {
-    // ignore: must_call_super
     stopAutoUpdate();
   }
 }

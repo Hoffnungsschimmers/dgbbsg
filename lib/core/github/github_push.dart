@@ -229,6 +229,33 @@ class GithubPush {
     }
   }
 
+  /// 获取仓库中指定文件的最近一次提交时间（ISO 8601 字符串），失败返回 null。
+  /// 用于显示"仓库里这个文件什么时候推送的"。
+  Future<String?> fetchCommitTime(String path) async {
+    final fileName = path.contains('/') || path.contains('\\')
+        ? path.split(RegExp(r'[/\\]')).last
+        : path;
+    final encoded = Uri.encodeQueryComponent(fileName);
+    final url = '/repos/$repo/commits?path=$encoded&per_page=1';
+    try {
+      final resp = await _send(_req('GET', url));
+      if (resp.statusCode != 200) return null;
+      final data = resp.data;
+      if (data is! List || data.isEmpty) return null;
+      final commit = data[0];
+      final date = commit is Map
+          ? (commit['commit'] is Map
+              ? (commit['commit']['committer'] is Map
+                  ? commit['commit']['committer']['date']?.toString()
+                  : null)
+              : null)
+          : null;
+      return date;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 批量推送多个文件，返回 路径 -> HTTP 状态码 的映射。
   Future<Map<String, int>> pushMultiple(Map<String, String> files, {String? message}) async {
     final results = <String, int>{};

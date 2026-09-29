@@ -30,7 +30,7 @@ class _MemAdapter implements dio_pkg.HttpClientAdapter {
       if (putStatus >= 400) return dio_pkg.ResponseBody.fromString('', putStatus);
       final bytes = <int>[];
       if (requestStream != null) {
-        await requestStream.listen(bytes.addAll).asFuture();
+        await requestStream.listen(bytes.addAll).asFuture<void>();
       }
       files[options.path] = bytes;
       return dio_pkg.ResponseBody.fromString('', putStatus);
@@ -164,7 +164,7 @@ void main() {
   testWidgets('同步配置-拉取恢复 经注入客户端把配置写回仓库', (tester) async {
     final adapter = _MemAdapter()
       ..files['https://dav.test/dav/cfnb_config.json'] = utf8.encode(
-        jsonEncode(const AppConfig(subDefaultCountry: 'DE', subLatencyTopN: 9)
+        jsonEncode(const AppConfig(subDefaultCountry: 'DE', landingOutputFile: 'panel_top.txt')
             .toJson()),
       );
     await pumpApp(
@@ -183,7 +183,7 @@ void main() {
     expect(find.text('配置已从 WebDAV 恢复'), findsOneWidget);
     final saved = repo.current;
     expect(saved.subDefaultCountry, 'DE');
-    expect(saved.subLatencyTopN, 9);
+    expect(saved.landingOutputFile, 'panel_top.txt');
 
     await tester.pumpWidget(const SizedBox());
   });

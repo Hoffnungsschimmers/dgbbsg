@@ -56,19 +56,6 @@ class ResultTable extends StatefulWidget {
     );
   }
 
-  static Widget _annotationCell(BuildContext context, String annotation) {
-    final t = AppThemeExt.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(14),
-      child: Text(
-        annotation.isEmpty ? '—' : annotation,
-        style: TextStyle(color: annotation.isEmpty ? t.textDim : t.text, fontSize: 13),
-        overflow: TextOverflow.ellipsis,
-        maxLines: 2,
-      ),
-    );
-  }
-
   @override
   State<ResultTable> createState() => _ResultTableState();
 }
@@ -105,7 +92,7 @@ class _ResultTableState extends State<ResultTable> {
               child: editMode && onReorder != null
                   ? ReorderableListView.builder(
                       itemCount: rows.length,
-                      onReorder: onReorder!,
+                      onReorder: onReorder,
                       buildDefaultDragHandles: false,
                       itemBuilder: (context, i) {
                         final row = rows[i];
@@ -229,11 +216,36 @@ class _DataRowWidget extends StatefulWidget {
 class _DataRowWidgetState extends State<_DataRowWidget> {
   bool _hovered = false;
 
+  /// 注释单元格。
+  Widget _annotationCell(BuildContext context, String annotation) {
+    final t = AppThemeExt.of(context);
+    final text = Text(
+      annotation.isEmpty ? '—' : annotation,
+      style: TextStyle(color: annotation.isEmpty ? t.textDim : t.text, fontSize: 13),
+      overflow: TextOverflow.ellipsis,
+      maxLines: 1,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 备注 = 来源名 + 原始节点名，常超出列宽，悬停给出全文。
+          annotation.isEmpty ? text : Tooltip(message: annotation, child: text),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = AppThemeExt.of(context);
-    final baseColor = widget.index.isOdd ? t.surfaceHover.withValues(alpha: 0.3) : Colors.transparent;
-    final hoverColor = _hovered ? t.surfaceHover : baseColor;
+    final baseColor =
+        (widget.index.isOdd ? t.surfaceHover.withValues(alpha: 0.3) : Colors.transparent);
+    final hoverColor = _hovered
+        ? t.accentSoft.withValues(alpha: 0.45)
+        : baseColor;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -254,16 +266,13 @@ class _DataRowWidgetState extends State<_DataRowWidget> {
           curve: Motion.curveStandard,
           decoration: BoxDecoration(
             color: hoverColor,
-            boxShadow: _hovered
-                ? [BoxShadow(color: t.border.withValues(alpha: 0.3), blurRadius: 4, offset: const Offset(0, 1))]
-                : null,
           ),
           child: Table(
             columnWidths: {for (var i = 0; i < widget.colWidths.length; i++) i: widget.colWidths[i]},
             children: [
               TableRow(children: [
                 ResultTable._nodeCell(context, widget.row.ipPort),
-                ResultTable._annotationCell(context, widget.row.annotation),
+                _annotationCell(context, widget.row.annotation),
                 if (widget.editMode)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),

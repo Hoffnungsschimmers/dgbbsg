@@ -2,50 +2,63 @@ import 'package:flutter/material.dart';
 
 import 'platform.dart';
 
-/// 设计语言：Edge Telemetry
-/// 单一强调色 = Cloudflare 橙 (#ff7a1a)，其余皆为中性灰阶，杜绝"背景与字体同色"。
+/// 设计语言：Professional Console（专业控制台）
+/// 主色 = 信号青绿，辅色 = 信号蓝；中性蓝灰阶；浅色为主，克制耐看。
+/// 保留 `edgeOrange` 常量名仅为兼容旧引用（`static const edgeOrange = accent`），
+/// 语义上已从橙色切换为青绿主色。
 class AppTheme {
-  static const edgeOrange = Color(0xFFFF7A1A);
+  /// 主色（青绿）。
+  static const accent = Color(0xFF0E9F6E);
 
-  static const _lightBg = Color(0xFFFBFAF8);
+  /// 辅色（信号蓝）：进度/信息/链接。
+  static const info = Color(0xFF3B82F6);
+
+  /// 兼容旧引用：= accent（青绿）。
+  static const edgeOrange = accent;
+
+  // ---- 浅色 ----
+  static const _lightBg = Color(0xFFF6F7F9);
   static const _lightSurface = Color(0xFFFFFFFF);
-  static const _lightSurfaceHover = Color(0xFFF3F1EC);
-  static const _lightText = Color(0xFF1C1917);
-  static const _lightTextDim = Color(0xFF78716C);
-  static const _lightBorder = Color(0xFFE7E3DC);
-  static const _lightLogFg = Color(0xFF1C1917);
-  // 语义色（与强调色和谐）。light 下取略深的可读版本。
+  static const _lightSurfaceHover = Color(0xFFEFF2F5);
+  static const _lightText = Color(0xFF1A2233);
+  static const _lightTextDim = Color(0xFF69758A);
+  static const _lightBorder = Color(0xFFE3E7EC);
+  // 语义色（light 取可读的深一档）
   static const _lightSuccess = Color(0xFF16A34A);
   static const _lightDanger = Color(0xFFDC2626);
   static const _lightWarning = Color(0xFFD97706);
+  static const _lightAccentSoft = Color(0xFFE3F4EC); // 青绿浅底（选中/悬停）
+  static const _lightInfoSoft = Color(0xFFE9F0FE); // 蓝浅底
 
-  static const _darkBg = Color(0xFF0C0A09);
-  static const _darkSurface = Color(0xFF1A1714);
-  static const _darkSurfaceHover = Color(0xFF262119);
-  static const _darkText = Color(0xFFF5F0EA);
-  static const _darkTextDim = Color(0xFFA39E96);
-  static const _darkBorder = Color(0xFF332D26);
-  static const _darkLogFg = Color(0xFFCBD5E1);
-  // 语义色 dark 下取略亮的可读版本。
+  // ---- 深色 ----
+  static const _darkBg = Color(0xFF0F1520);
+  static const _darkSurface = Color(0xFF171E2B);
+  static const _darkSurfaceHover = Color(0xFF202938);
+  static const _darkText = Color(0xFFE6EDF5);
+  static const _darkTextDim = Color(0xFF8FA0B5);
+  static const _darkBorder = Color(0xFF28344A);
+  // 语义色（dark 取亮一档）
   static const _darkSuccess = Color(0xFF4ADE80);
   static const _darkDanger = Color(0xFFF87171);
   static const _darkWarning = Color(0xFFFBBF24);
+  static const _darkAccentSoft = Color(0xFF12382B);
+  static const _darkInfoSoft = Color(0xFF1B2F55);
 
-  /// 图表配色（6 色循环），以强调橙为主轴，其余抽取自中性/暖色系，保持设计语言。
+  /// 图表配色（6 色循环）：以主色为主轴，中性蓝灰 + 冷色点缀。
   static const List<Color> chartPalette = [
-    Color(0xFFFF7A1A), // 强调橙
+    Color(0xFF0E9F6E), // 青绿主色
+    Color(0xFF3B82F6), // 信号蓝
     Color(0xFF6B7280), // 中性灰
-    Color(0xFF0EA5E9), // 冷色点缀
     Color(0xFF16A34A), // 成功绿
     Color(0xFFD97706), // 琥珀
     Color(0xFF7C3AED), // 紫
   ];
 
-  /// 深色模式图表配色：亮度更高，确保在暗色背景上的可读性。
+  /// 深色模式图表配色：亮度更高，确保暗色背景可读。
   static const List<Color> chartPaletteDark = [
-    Color(0xFFFF8C3A), // 强调橙（更亮）
+    Color(0xFF2DD4A0), // 青绿（更亮）
+    Color(0xFF60A5FA), // 蓝（更亮）
     Color(0xFF9CA3AF), // 中性灰（更亮）
-    Color(0xFF38BDF8), // 冷色点缀（更亮）
     Color(0xFF4ADE80), // 成功绿（更亮）
     Color(0xFFFBBF24), // 琥珀（更亮）
     Color(0xFFA78BFA), // 紫（更亮）
@@ -58,10 +71,11 @@ class AppTheme {
         text: _lightText,
         textDim: _lightTextDim,
         border: _lightBorder,
-        logFg: _lightLogFg,
         success: _lightSuccess,
         danger: _lightDanger,
         warning: _lightWarning,
+        accentSoft: _lightAccentSoft,
+        infoSoft: _lightInfoSoft,
         brightness: Brightness.light,
       );
 
@@ -72,10 +86,11 @@ class AppTheme {
         text: _darkText,
         textDim: _darkTextDim,
         border: _darkBorder,
-        logFg: _darkLogFg,
         success: _darkSuccess,
         danger: _darkDanger,
         warning: _darkWarning,
+        accentSoft: _darkAccentSoft,
+        infoSoft: _darkInfoSoft,
         brightness: Brightness.dark,
         chartColors: chartPaletteDark,
       );
@@ -87,24 +102,28 @@ class AppTheme {
     required Color text,
     required Color textDim,
     required Color border,
-    required Color logFg,
     required Color success,
     required Color danger,
     required Color warning,
+    required Color accentSoft,
+    required Color infoSoft,
     required Brightness brightness,
     List<Color>? chartColors,
   }) {
     final effectiveChartPalette = chartColors ?? chartPalette;
     final scheme = ColorScheme.fromSeed(
-      seedColor: edgeOrange,
+      seedColor: accent,
       brightness: brightness,
       surface: surface,
-      primary: edgeOrange,
+      primary: accent,
       onPrimary: Colors.white,
+      secondary: info,
+      onSecondary: Colors.white,
       onSurface: text,
     ).copyWith(
       surface: surface,
       onSurface: text,
+      surfaceContainer: surface,
     );
 
     // M3 标准圆角：12px（对应 shape.medium）
@@ -128,7 +147,7 @@ class AppTheme {
         labelMedium: TextStyle(fontSize: 13, color: textDim),
         labelSmall: TextStyle(fontSize: 12, color: textDim),
       ),
-      // 全局输入框样式：统一样式，消除 inputDecorationFor 的重复构造
+      // 全局输入框样式
       inputDecorationTheme: InputDecorationTheme(
         isDense: true,
         filled: true,
@@ -136,7 +155,7 @@ class AppTheme {
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: border)),
         enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: border)),
-        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: edgeOrange, width: 1.5)),
+        focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: accent, width: 1.5)),
         hintStyle: TextStyle(color: textDim, fontSize: 12),
       ),
       cardTheme: CardThemeData(
@@ -155,7 +174,7 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: edgeOrange,
+          backgroundColor: accent,
           foregroundColor: Colors.white,
           padding: EdgeInsets.symmetric(horizontal: 18, vertical: kIsMobile ? 14 : 12),
           minimumSize: Size(64, kIsMobile ? 48 : 36),
@@ -182,35 +201,40 @@ class AppTheme {
         ),
       ),
       dividerTheme: DividerThemeData(color: border, thickness: 1),
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: edgeOrange,
-      ),
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: accent),
       chipTheme: ChipThemeData(
         backgroundColor: bg,
         side: BorderSide(color: border),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         labelStyle: TextStyle(fontSize: 12, color: text),
       ),
-      // Tooltip 触发时机：移动端用 tap（hover 不存在），桌面用 manual
       tooltipTheme: TooltipThemeData(
         triggerMode: kIsMobile ? TooltipTriggerMode.tap : TooltipTriggerMode.manual,
         showDuration: const Duration(seconds: 3),
       ),
       sliderTheme: SliderThemeData(
-        activeTrackColor: edgeOrange,
-        thumbColor: edgeOrange,
-        overlayColor: edgeOrange.withValues(alpha: 0.12),
+        activeTrackColor: accent,
+        thumbColor: accent,
+        overlayColor: accent.withValues(alpha: 0.12),
         inactiveTrackColor: border,
       ),
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return edgeOrange;
+          if (states.contains(WidgetState.selected)) return accent;
           return null;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) return edgeOrange.withValues(alpha: 0.5);
+          if (states.contains(WidgetState.selected)) return accent.withValues(alpha: 0.5);
           return null;
         }),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        indicatorColor: accentSoft,
+        backgroundColor: bg,
+        selectedIconTheme: IconThemeData(color: accent),
+        selectedLabelTextStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: text),
+        unselectedIconTheme: IconThemeData(color: textDim),
+        unselectedLabelTextStyle: TextStyle(fontSize: 13, color: textDim),
       ),
       extensions: [
         AppThemeExt(
@@ -220,10 +244,13 @@ class AppTheme {
           text: text,
           textDim: textDim,
           border: border,
-          logFg: logFg,
           success: success,
           danger: danger,
           warning: warning,
+          accent: accent,
+          accentSoft: accentSoft,
+          info: info,
+          infoSoft: infoSoft,
           chartPalette: effectiveChartPalette,
           radius: radius,
         ),
@@ -232,7 +259,7 @@ class AppTheme {
   }
 }
 
-/// 主题语义色扩展，供自定义组件直接取色（对应旧版 C 字典）。
+/// 主题语义色扩展，供自定义组件直接取色。
 class AppThemeExt extends ThemeExtension<AppThemeExt> {
   final Color bg;
   final Color surface;
@@ -240,11 +267,15 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
   final Color text;
   final Color textDim;
   final Color border;
-  final Color logFg;
-  // 语义色：状态药丸 / 延迟分级 / 着色日志用。
+  // 语义色：状态药丸 / 着色日志用。
   final Color success;
   final Color danger;
   final Color warning;
+  // 主色/辅色及浅底（选中、悬停、徽标背景）。
+  final Color accent;
+  final Color accentSoft;
+  final Color info;
+  final Color infoSoft;
   // 图表配色循环（fl_chart / 自绘 bar 用）。
   final List<Color> chartPalette;
   final BorderRadius radius;
@@ -256,10 +287,13 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     required this.text,
     required this.textDim,
     required this.border,
-    required this.logFg,
     required this.success,
     required this.danger,
     required this.warning,
+    required this.accent,
+    required this.accentSoft,
+    required this.info,
+    required this.infoSoft,
     required this.chartPalette,
     required this.radius,
   });
@@ -267,18 +301,15 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
   static AppThemeExt of(BuildContext context) =>
       Theme.of(context).extension<AppThemeExt>()!;
 
-  /// 延迟分级颜色：<80ms 成功 / <150ms 警告 / <300ms 强调橙 / 否则危险。
-  /// 复用于表格行内条形图与状态药丸。
-  Color latencyTierColor(double? latencyMs) {
-    if (latencyMs == null) return textDim;
-    if (latencyMs < 80) return success;
-    if (latencyMs < 150) return warning;
-    if (latencyMs < 300) return AppTheme.edgeOrange;
-    return danger;
-  }
-
   /// 图表配色按索引取（循环，避免越界）。
   Color chartColor(int i) => chartPalette[i % chartPalette.length];
+
+  /// 主色渐变（青绿 → 蓝），用于品牌元素/横幅。
+  LinearGradient accentGradient() => LinearGradient(
+        colors: [accent, info],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
 
   @override
   AppThemeExt copyWith({
@@ -288,10 +319,13 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
     Color? text,
     Color? textDim,
     Color? border,
-    Color? logFg,
     Color? success,
     Color? danger,
     Color? warning,
+    Color? accent,
+    Color? accentSoft,
+    Color? info,
+    Color? infoSoft,
     List<Color>? chartPalette,
     BorderRadius? radius,
   }) =>
@@ -302,10 +336,13 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
         text: text ?? this.text,
         textDim: textDim ?? this.textDim,
         border: border ?? this.border,
-        logFg: logFg ?? this.logFg,
         success: success ?? this.success,
         danger: danger ?? this.danger,
         warning: warning ?? this.warning,
+        accent: accent ?? this.accent,
+        accentSoft: accentSoft ?? this.accentSoft,
+        info: info ?? this.info,
+        infoSoft: infoSoft ?? this.infoSoft,
         chartPalette: chartPalette ?? this.chartPalette,
         radius: radius ?? this.radius,
       );
@@ -313,7 +350,6 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
   @override
   AppThemeExt lerp(ThemeExtension<AppThemeExt>? other, double t) {
     if (other is! AppThemeExt) return this;
-    // 调色板逐项插值；长度不一致则短的一方补齐对方剩余项。
     final otherChart = other.chartPalette;
     final n = chartPalette.length < otherChart.length
         ? chartPalette.length
@@ -332,10 +368,13 @@ class AppThemeExt extends ThemeExtension<AppThemeExt> {
       text: Color.lerp(text, other.text, t)!,
       textDim: Color.lerp(textDim, other.textDim, t)!,
       border: Color.lerp(border, other.border, t)!,
-      logFg: Color.lerp(logFg, other.logFg, t)!,
       success: Color.lerp(success, other.success, t)!,
       danger: Color.lerp(danger, other.danger, t)!,
       warning: Color.lerp(warning, other.warning, t)!,
+      accent: Color.lerp(accent, other.accent, t)!,
+      accentSoft: Color.lerp(accentSoft, other.accentSoft, t)!,
+      info: Color.lerp(info, other.info, t)!,
+      infoSoft: Color.lerp(infoSoft, other.infoSoft, t)!,
       chartPalette: lerpedChart,
       radius: BorderRadius.lerp(radius, other.radius, t)!,
     );

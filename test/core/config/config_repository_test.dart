@@ -15,7 +15,7 @@ void main() {
   test('init with empty storage returns default config', () async {
     SharedPreferences.setMockInitialValues({});
     final repo = await ConfigRepository.init(secure: InMemorySecureKv());
-    expect(repo.current.subLatencyTopN, 50);
+    expect(repo.current.landingOutputFile, 'addressesapi_top.txt');
     expect(repo.current.guiTheme, 'light');
   });
 
@@ -83,35 +83,34 @@ void main() {
     expect(await secure.read('github_token'), isNull);
   });
 
-  test('legacy subLatencyTimeout 2.0 migrates to 3.0', () async {
+  test('legacy default country UN migrates to empty', () async {
     SharedPreferences.setMockInitialValues({
-      kConfigJson: jsonEncode({'SUB_LATENCY_TIMEOUT': 2.0}),
+      kConfigJson: jsonEncode({'SUB_DEFAULT_COUNTRY': 'UN'}),
     });
     final repo = await ConfigRepository.init(secure: InMemorySecureKv());
-    expect(repo.current.subLatencyTimeout, 3.0);
+    expect(repo.current.subDefaultCountry, '');
   });
 
   test('migration writes schema version', () async {
     SharedPreferences.setMockInitialValues({
-      kConfigJson: jsonEncode({'SUB_LATENCY_TIMEOUT': 2.0}),
+      kConfigJson: jsonEncode({'SUB_DEFAULT_COUNTRY': 'UN'}),
     });
     await ConfigRepository.init(secure: InMemorySecureKv());
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt('app_config_version'), 1);
   });
 
-  test('versioned config preserves user values (0 = keep all)', () async {
+  test('versioned config preserves user values', () async {
     SharedPreferences.setMockInitialValues({
       'app_config_version': 1,
       kConfigJson: jsonEncode({
-        'SUB_LATENCY_TOP_N': 0,
-        'SUB_LATENCY_MAX_MS': 0,
-        'SUB_LATENCY_TIMEOUT': 2.0,
+        'LANDING_OUTPUT_FILE': 'custom_top.txt',
+        'SUB_DEFAULT_COUNTRY': 'UN',
       }),
     });
     final repo = await ConfigRepository.init(secure: InMemorySecureKv());
-    expect(repo.current.subLatencyTopN, 0);
-    expect(repo.current.subLatencyMaxMs, 0);
-    expect(repo.current.subLatencyTimeout, 2.0);
+    expect(repo.current.landingOutputFile, 'custom_top.txt');
+    // 已有版本标记：不再改写用户值（UN 保持不变）。
+    expect(repo.current.subDefaultCountry, 'UN');
   });
 }

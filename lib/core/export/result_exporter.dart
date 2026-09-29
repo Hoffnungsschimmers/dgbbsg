@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import 'package:cfnb_app/core/latency/latency_prober.dart';
+import 'package:cfnb_app/core/net/endpoint.dart';
 import 'package:cfnb_app/core/net/ip.dart';
 import 'package:cfnb_app/features/results/result_state.dart';
 
@@ -87,11 +87,18 @@ class ResultExporter {
   /// IPv6 加方括号（Clash/sing-box/V2Ray 的 server 字段要求）。
   static String _ipForServer(String ip) => isIpv6(ip) ? '[$ip]' : ip;
 
-  /// 将 [ResultRow] 转换为 (ip, port, country, latency, source) 五元组，
+  /// CSV 字段转义：来源列现在含原始节点备注，逗号/引号很常见（如「美国, LA 01」），
+  /// 只在确实需要时加双引号，保持简单行输出形态不变。
+  static String _csvField(String s) {
+    if (!s.contains(',') && !s.contains('"')) return s;
+    return '"${s.replaceAll('"', '""')}"';
+  }
+
+  /// 将 [ResultRow] 转换为 (ip, port, country, source) 四元组，
   /// 供各导出方法复用。
-  static List<({String ip, int port, String country, double? latency, String source})>
+  static List<({String ip, int port, String country, String source})>
       _buildEntries(List<ResultRow> rows) {
-    final entries = <({String ip, int port, String country, double? latency, String source})>[];
+    final entries = <({String ip, int port, String country, String source})>[];
     for (final row in rows) {
       final parsed = _parseIpPort(row.ipPort);
       if (parsed == null) continue;
@@ -99,7 +106,6 @@ class ResultExporter {
         ip: parsed.$1,
         port: parsed.$2,
         country: nodeCountry(row.node),
-        latency: parseLatency(row.latency),
         source: row.source,
       ));
     }
@@ -112,14 +118,13 @@ class ResultExporter {
 
   /// 将节点列表导出为 CSV 格式。
   ///
-  /// 表头：`ip,port,country,latency_ms,source`
+  /// 表头：`ip,port,country,source`
   /// - IP 和端口从 `ipPort` 解析，支持 IPv6 `[addr]:port` 格式。
-  /// - 延迟值从 `"50.00 ms"` 等字符串中提取数值。
   static String toCsv(List<ResultRow> rows) {
-    final buf = StringBuffer('ip,port,country,latency_ms,source');
+    final buf = StringBuffer('ip,port,country,source');
     for (final e in _buildEntries(rows)) {
       buf.writeln();
-      buf.write('${e.ip},${e.port},${e.country},${e.latency ?? ''},${e.source}');
+      buf.write('${e.ip},${e.port},${e.country},${_csvField(e.source)}');
     }
     return buf.toString();
   }

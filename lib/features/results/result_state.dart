@@ -6,19 +6,13 @@ import 'package:cfnb_app/core/net/ip.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 从 "50.00 ms" 或 "50.00ms" 提取数值。统一的延迟解析函数。
-double? parseLatency(String? s) {
-  if (s == null) return null;
-  return double.tryParse(s.replaceAll(RegExp(r'[^0-9.]'), ''));
-}
-
 /// 结果行。
 /// 格式：`ip:port#注释`（注释为原始节点名称，如"精品v4 1"）
 class ResultRow {
   final String node;
+  /// 历史格式兼容：旧延迟优选输出会在行尾带 `50.00 ms`；当前流程不再产生延迟。
   final String? latency;
-  final String? jitter;
-  ResultRow(this.node, [this.latency, this.jitter]);
+  ResultRow(this.node, [this.latency]);
 
   String get ipPort => node.split('#').first;
 
@@ -67,38 +61,39 @@ class ResultRow {
 ///   - 新格式（空格分隔）："1.2.3.4:443#US CM 50.00 ms"
 ///   - 旧格式（@ 分隔）：  "1.2.3.4:443#US@CM 50.00 ms"
 ///   - 纯节点："1.2.3.4:443#US" 或 "example.com:2053# 洛璃"
+/// 已下线测速功能的旧行尾 "120.50 Mbps" 会被识别并丢弃，不污染节点与延迟。
 List<ResultRow> parseResultLines(String text) {
   final rows = <ResultRow>[];
   for (final raw in text.split('\n')) {
     final line = raw.trim();
     if (line.isEmpty || line.startsWith('#')) continue;
     if (!line.contains(':')) continue;
-    final parts = line.split(RegExp(r'\s+'));
-    // 找到延迟部分：可能 "50.00 ms"（两个 token）或 "56.00ms"（一个 token）
-    // 延迟 token 特征：含 'ms' 或者是紧跟在含 'ms' token 前面的纯数字
-    var latencyStart = -1; // 延迟数字开始的 index
-    for (var i = 1; i < parts.length; i++) {
-      if (parts[i].contains('ms')) {
-        // "50.00 ms" 模式：前一个是数字
-        if (i > 0 && RegExp(r'^\d').hasMatch(parts[i - 1])) {
-          latencyStart = i - 1;
-        } else {
-          // "56.00ms" 模式：这个 token 自己就是延迟
-          latencyStart = i;
-        }
-        break;
-      }
+    var parts = line.split(RegExp(r'\s+'));
+    // 丢弃旧测速残留 token（如 "120.50 Mbps" 两 token 或 "120.50Mbps" 单 token），
+    // 否则纯数字 token 会被误判为 "50.00 ms" 式延迟的数字半段。
+    parts = parts.where((p) {
+      if (p == 'Mbps') return false;
+      if (RegExp(r'^\d+(\.\d+)?Mbps$').hasMatch(p)) return false;
+      return true;
+    }).toList();
+    if (parts.isEmpty) continue;
+    // 延迟部分只认行尾形态："50.00 ms"（两 token）或 "56.00ms"（单 token）。
+    // 若行中出现「数字+ms」后面还有文字（例如备注「美国 120ms 优化专线」），
+    // 不能当延迟切掉，否则其后的备注会在结果页保存时整段丢失。
+    var latencyStart = -1;
+    if (parts.length >= 2 &&
+        parts.last == 'ms' &&
+        RegExp(r'^\d+(\.\d+)?$').hasMatch(parts[parts.length - 2])) {
+      latencyStart = parts.length - 2;
+    } else if (RegExp(r'^\d+(\.\d+)?ms$').hasMatch(parts.last)) {
+      latencyStart = parts.length - 1;
     }
-    // 节点部分 = 延迟之前的全部 token（含来源）
+    // 节点部分 = 延迟之前的全部 token（含来源与原始备注）
     final nodeEnd = latencyStart >= 0 ? latencyStart : parts.length;
     final node = bracketIpv6Host(parts.sublist(0, nodeEnd).join(' '));
     String? latency;
     if (latencyStart >= 0) {
-      if (latencyStart + 1 < parts.length && parts[latencyStart + 1].contains('ms')) {
-        latency = '${parts[latencyStart]} ${parts[latencyStart + 1]}';
-      } else {
-        latency = parts[latencyStart];
-      }
+      latency = parts.sublist(latencyStart).join(' ');
     }
     rows.add(ResultRow(node, latency));
   }
@@ -110,7 +105,7 @@ class ResultState {
   final String? sourceLabel;
   final String? currentFile;
   final String? rawText;
-  final String? generatedAt; // 上次优选时间（来自 JSON 的 generated_at）
+  final String? generatedAt; // 上次生成时间（来自 .json 旁文件的 generated_at）
   final String searchQuery; // 搜索关键词
 
   ResultState({
@@ -175,7 +170,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
 
   /// 从文件加载（用于「刷新」与单步执行后）。
   /// 同时保存原始文本，供「查看文件内容」面板使用。
-  /// 若同名 .json 文件存在，读取其中的 generated_at 时间戳和 jitter_ms 数据。
+  /// 若同名 .json 文件存在，读取其中的 generated_at 时间戳。
   Future<void> loadFile(String path) async {
     final resolved = resolveOutputPath(path, (await getApplicationDocumentsDirectory()).path);
     final f = File(resolved);
@@ -185,44 +180,19 @@ class ResultNotifier extends StateNotifier<ResultState> {
     }
     final text = await f.readAsString();
 
-    // 尝试从 .json 旁文件读取优选时间戳和抖动数据
+    // 尝试从 .json 旁文件读取生成时间戳
     String? generatedAt;
-    final jitterMap = <String, double>{}; // ip:port -> jitter_ms
     final jsonFile = File('$resolved.json');
     if (jsonFile.existsSync()) {
       try {
         final jsonData = jsonDecode(await jsonFile.readAsString());
-        if (jsonData is Map) {
-          if (jsonData['generated_at'] != null) {
-            generatedAt = jsonData['generated_at'].toString();
-          }
-          final nodes = jsonData['nodes'] as List?;
-          if (nodes != null) {
-            for (final n in nodes) {
-              if (n is! Map) continue;
-              final ip = n['ip'] as String? ?? '';
-              final port = n['port'] as int? ?? 0;
-              final jitter = (n['jitter_ms'] as num?)?.toDouble();
-              if (ip.isNotEmpty && port > 0 && jitter != null) {
-                jitterMap[bracketIpv6Host('$ip:$port')] = jitter;
-              }
-            }
-          }
+        if (jsonData is Map && jsonData['generated_at'] != null) {
+          generatedAt = jsonData['generated_at'].toString();
         }
       } catch (_) {}
     }
 
-    // 解析行并填充抖动数据
-    var rows = parseResultLines(text);
-    if (jitterMap.isNotEmpty) {
-      rows = rows.map((r) {
-        final jitter = jitterMap[r.ipPort];
-        if (jitter != null) {
-          return ResultRow(r.node, r.latency, '${jitter.toStringAsFixed(2)} ms');
-        }
-        return r;
-      }).toList();
-    }
+    final rows = parseResultLines(text);
 
     state = ResultState(
       rows: rows,
@@ -269,7 +239,7 @@ class ResultNotifier extends StateNotifier<ResultState> {
     state = state.copyWith(rows: rows);
   }
 
-  /// 添加一个节点行（原始格式：ip:port#CC source）。
+  /// 添加一个节点行（原始格式：ip:port#CC 来源 备注）。
   void addRow(String rawLine) {
     final line = bracketIpv6Host(rawLine.trim());
     if (line.isEmpty || !line.contains(':')) return;

@@ -14,6 +14,7 @@ import 'app/theme.dart';
 import 'core/config/app_config.dart';
 import 'core/webdav/webdav_client.dart';
 import 'core/webdav/webdav_sync.dart';
+import 'features/onboarding/onboarding_wizard.dart';
 import 'features/results/result_state.dart';
 import 'features/subscriptions/subscriptions_state.dart';
 import 'features/widgets/common.dart';
@@ -127,16 +128,36 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     }
   }
 
+  /// 首次启动引导：hasCompletedOnboarding 为 false 时弹全屏引导页。
+  /// 引导完成（或跳过）后落盘标记，仅弹一次。
+  Future<void> _maybeShowOnboarding(AppConfig cfg) async {
+    if (cfg.hasCompletedOnboarding) return;
+    // 等首帧渲染完成再弹，避免 Navigator 尚未就绪。
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        final repo = await ref.read(configRepositoryProvider.future);
+        // 二次确认：等待期间用户可能已在引导页完成配置。
+        if (repo.current.hasCompletedOnboarding) return;
+        if (!mounted || !context.mounted) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => OnboardingWizard(repo: repo),
+          ),
+        );
+      } catch (_) {
+        // 引导展示失败不影响主流程
+      }
+    });
+  }
+
   Future<void> _initSystemTray() async {
     await systemTrayManager.init(
       onShow: () => systemTrayManager.showWindow(),
       onRunSub: () {
         systemTrayManager.showWindow();
         ref.read(subProvider.notifier).runSubscription();
-      },
-      onRunLatency: () {
-        systemTrayManager.showWindow();
-        ref.read(subProvider.notifier).runLatency();
       },
       onQuit: () async {
         systemTrayManager.dispose();
@@ -184,7 +205,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
     // 监听主题变化 → 更新状态栏
     ref.listen(themeModeProvider, (_, next) => _applySystemUI(next));
 
-    // 首次加载：从持久化配置读取主题偏好
+    // 首次加载：从持久化配置读取主题偏好；未完成引导时弹出引导页。
     ref.listen(configProvider, (_, next) {
       next.whenData((cfg) {
         final ThemeMode initial = switch (cfg.guiTheme) {
@@ -196,6 +217,7 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
           ref.read(themeModeProvider.notifier).state = initial;
         }
         _syncWebDavAutoSync(cfg);
+        _maybeShowOnboarding(cfg);
       });
     });
 

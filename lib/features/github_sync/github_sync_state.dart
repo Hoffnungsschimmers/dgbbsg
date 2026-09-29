@@ -19,6 +19,9 @@ class GithubSyncState {
   /// 远程文件的 GitHub 路径（如 addressesapi_top.txt）。
   final String? remoteFile;
 
+  /// 远程文件最近一次提交时间（ISO 8601），来自 GitHub commits API。
+  final String? remoteUpdatedAt;
+
   /// 是否正在拉取。
   final bool loading;
 
@@ -57,6 +60,7 @@ class GithubSyncState {
     this.error,
     this.message,
     this.searchQuery = '',
+    this.remoteUpdatedAt,
   });
 
   GithubSyncState copyWith({
@@ -72,6 +76,8 @@ class GithubSyncState {
     String? message,
     bool clearMessage = false,
     String? searchQuery,
+    String? remoteUpdatedAt,
+    bool clearUpdatedAt = false,
   }) =>
       GithubSyncState(
         remoteNodes: remoteNodes ?? this.remoteNodes,
@@ -82,6 +88,7 @@ class GithubSyncState {
         error: clearError ? null : (error ?? this.error),
         message: clearMessage ? null : (message ?? this.message),
         searchQuery: searchQuery ?? this.searchQuery,
+        remoteUpdatedAt: clearUpdatedAt ? null : (remoteUpdatedAt ?? this.remoteUpdatedAt),
       );
 }
 
@@ -124,7 +131,7 @@ class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
         );
         return;
       }
-      final file = cfg.subLatencyOutputFile;
+      final file = cfg.landingOutputFile;
       final (content, sha) = await github.pullFile(file);
       if (content == null) {
         state = state.copyWith(
@@ -132,15 +139,22 @@ class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
           error: '远程文件不存在：$file',
           remoteFile: file,
           clearSha: true,
+          clearUpdatedAt: true,
         );
         return;
       }
       final rows = parseResultLines(content);
+      // 获取该文件最近一次提交时间（失败不阻塞，仅提示未知）
+      String? updatedAt;
+      try {
+        updatedAt = await github.fetchCommitTime(file);
+      } catch (_) {}
       state = state.copyWith(
         loading: false,
         remoteNodes: rows,
         remoteSha: sha,
         remoteFile: file,
+        remoteUpdatedAt: updatedAt,
         message: '拉取成功：$file（${rows.length} 个节点）',
       );
     } catch (e) {
@@ -244,7 +258,7 @@ class GithubSyncNotifier extends StateNotifier<GithubSyncState> {
         );
         return;
       }
-      final file = state.remoteFile ?? cfg.subLatencyOutputFile;
+      final file = state.remoteFile ?? cfg.landingOutputFile;
 
       // 序列化节点列表为文本
       final sb = StringBuffer();
