@@ -213,3 +213,6 @@ head.txt
 # 本机构建环境（Gradle 代理等），勿入库
 android/gradle.properties
 
+# 本地工具目录，勿入库
+.mimosa/
+

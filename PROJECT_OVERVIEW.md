@@ -15,7 +15,7 @@
          → 推送 GitHub / WebDAV 备份 / Webhook 通知
 ```
 
-- 远端仓库：https://github.com/Hoffnungsschimmers/cfnb
+- 远端仓库：https://github.com/Hoffnungsschimmers/dgbbsg （原名 `cfnb`，已改名；旧地址靠 GitHub 重定向仍可用）
 - 主要目标平台：**Windows**（已验证可构建运行）、**Android**（APK 未验证构建）；工程内也保留了 ios/web/linux/macos 目录。
 
 ## 2. 技术栈与环境
@@ -141,9 +141,10 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 5. **输出** `writeSubOutput`：`addressesapi.txt`（LF 换行）+ `.json` 旁文件（`generated_at`/`node_count`）。
 
 节点行格式：`IP:端口#国家码 来源名 原始节点备注`，如 `172.64.145.93:443#SG 麒麟优选 🇸 新加坡 01`。
-规则（2026-09-29 起）：国家码取自原始名并**必须紧跟在 `#` 后**（`findCcSourceSep` 与结果页都按「# 后第一个空格」切分，位置不能挪）；
-原始名剥掉国家码后剩下的原文作备注跟在来源名之后；`#` 换成 `-`、换行与连续空格压缩（`_cleanRemark`）；
+规则（2026-09-29 定稿）：国家码取自原始名并**必须紧跟在 `#` 后**（`findCcSourceSep` 与结果页都按「# 后第一个空格」切分，位置不能挪）；
+原始名剥掉国家码后剩下的原文作备注跟在来源名之后；备注**原样保留 `#`**（只有行首第一个 `#` 是结构性的），仅压缩换行与连续空格（`_cleanRemark`）；
 原始名开头/结尾正好等于来源名时不重复拼接（`_stripSourceDup`）；纯文本列表源（bestcf 类 txt）同样保留 `#CC` 后的原文；
+提不出国家码且未配默认国家码时写占位码 `UN`（`unknownCountryTag`），原始名只出现在备注里，落地检测会用真实落地码覆盖；
 同 ip:port 去重仍只保留首次出现那条（含其来源名与备注）；IPv6 自动方括号包裹（`bracketIpv6Host`）；兼容旧 `#CC@来源` 格式读取。
 
 ### 5.2 落地检测（「代理测落地」/「直连测落地」）
@@ -213,12 +214,11 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 ### 10.2 待确认事项（未擅自改）
 
-1. `githubRepo` 默认值分叉：构造函数 `Hoffnungsschimmers/mnscn`，`fromJson` 兜底 `Hoffnungsschimmers/cf-ip`，收敛成哪个待用户定。
-2. 落地检测串行（防 CF 限流），加并发 + 进度条需用户确认。
-3. 备注里的 `#` 目前清洗成 `-`（`_cleanRemark`）；用户的源大量用 `#` 当名字分隔符，是否原样保留待定——保留 `#` 对本 App 解析链路无害（只有行首第一个 `#` 是结构性的），风险在外部工具把 `#` 当注释。
-4. 提不出国家码的行（真实数据 1262 行里约 105 行）会把原始名塞进国家码位，如 `#移动优选 02 Moist_R`。**这是改动前后一致的老行为**，是否改成占位码/留空待定（也可由用户在配置页填「默认国家码」规避）。
-5. Android APK 本地从未验证构建（环境拉不到 AGP）；CI 修好后由 CI 回答。
-6. **HANDOVER.md 已部分过时**：其 §3~§5.3 描述的延迟优选相关内容不再成立，以本文为准。
+1. Android APK 本地从未验证构建（环境拉不到 AGP）；CI 修好后由 CI 回答。
+2. 远端仓库已迁移：`Hoffnungsschimmers/cfnb` → `Hoffnungsschimmers/dgbbsg`（push 时 GitHub 回显重定向）。本地 `origin` 与本文 §1 仍写旧地址，是否统一待确认。
+3. `.mimosa/` 是本地工具目录且未被 `.gitignore` 忽略，是否加忽略待确认。
+
+**已定稿（2026-09-29，用户确认）**：备注原样保留 `#`；提不出国家码的行写占位码 `UN`（原始名只进备注）；`githubRepo` 默认统一为 `Hoffnungsschimmers/mnscn`（构造函数与 `fromJson` 兜底一致，已加回归测试）；落地检测**保持串行**，不加并发。
 
 ## 11. 开发约定（硬教训，沿自 HANDOVER §7）
 
