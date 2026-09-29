@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:dio/dio.dart' as dio_pkg;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/notification_helper.dart';
 import '../../app/providers.dart';
@@ -15,6 +16,7 @@ import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
 import '../../core/net/proxy.dart';
 import '../../core/net/http_fetcher.dart';
+import '../../core/subscription/source_health.dart';
 import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
 
@@ -137,6 +139,10 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         proxy: _systemProxy,
         onLog: (m) => logger.info(m),
       );
+      await _trackSourceHealth(cfg,
+          okNames: result.okSourceNames,
+          failedNames: result.failedSourceNames,
+          logger: logger);
       final nodes = result.nodes;
       if (_cancelRequested) {
         logger.info('「订阅IP」已取消');
@@ -294,6 +300,38 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       return (landings.length, ipOfNode.length);
     } finally {
       state = state.copyWith(running: false, clearAction: true);
+    }
+  }
+
+  /// 订阅源健康度：累计每个来源的连续失败轮数，刚好达到阈值时告警一次。
+  /// 统计失败绝不影响转换主流程，因此整段吞异常。
+  Future<void> _trackSourceHealth(
+    AppConfig cfg, {
+    required Set<String> okNames,
+    required Set<String> failedNames,
+    required AppLogger logger,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final before = SourceHealth.fromPrefs(prefs);
+      // 同名任务（如多个未打标签的订阅链接都叫 url）只要有一项成功就算成功。
+      final all = {...okNames, ...failedNames};
+      final failed = failedNames.difference(okNames);
+      final after = updateFailureStreaks(before, allSources: all, failed: failed);
+      await SourceHealth.saveToPrefs(prefs, after);
+
+      final crossed = sourcesCrossedThreshold(before, after);
+      if (crossed.isEmpty) return;
+      final detail = crossed.map((n) => '$n（连续 ${after[n]} 轮）').join('、');
+      logger.warning('来源连续 $sourceFailureAlertThreshold 轮拉取失败：$detail');
+      _notifyWebhook(
+        cfg,
+        title: '订阅源连续失败',
+        body: '以下来源已连续 $sourceFailureAlertThreshold 轮拉取失败：$detail',
+        isError: true,
+      );
+    } catch (_) {
+      // 健康度统计不影响主流程
     }
   }
 

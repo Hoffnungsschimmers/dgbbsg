@@ -237,9 +237,17 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
 /// 用配置默认国家码，仍为空则写占位码 [unknownCountryTag]。
 ///
 /// 返回记录：`nodes` 去重后的节点列表，`okSources` 解析出节点的源数，
-/// `failedSources` 拉取失败或未解析出节点的源数。[fetch] 注入真实 HTTP 拉取；
+/// `failedSources` 拉取失败或未解析出节点的源数，`okSourceNames` / `failedSourceNames`
+/// 为对应来源名（供健康度统计；同一名字只要有一项成功就算成功）。
+/// [fetch] 注入真实 HTTP 拉取；
 /// [resolve] 注入域名解析（返回 IP 或 null）。[parser] 用于从节点名提取国家码。
-Future<({List<String> nodes, int okSources, int failedSources})> convertSubscriptions(
+Future<({
+  List<String> nodes,
+  int okSources,
+  int failedSources,
+  Set<String> okSourceNames,
+  Set<String> failedSourceNames,
+})> convertSubscriptions(
   AppConfig config, {
   required SubFetcher fetch,
   required Future<String?> Function(String host) resolve,
@@ -249,10 +257,18 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
 }) async {
   final tasks = collectSubscriptionTasks(config);
   if (tasks.isEmpty) {
-    return (nodes: <String>[], okSources: 0, failedSources: 0);
+    return (
+      nodes: <String>[],
+      okSources: 0,
+      failedSources: 0,
+      okSourceNames: <String>{},
+      failedSourceNames: <String>{},
+    );
   }
 
   final rawNodes = <({String host, int port, String name, String source})>[];
+  final okSourceNames = <String>{};
+  final failedSourceNames = <String>{};
   var okSources = 0;
   var failedSources = 0;
 
@@ -294,15 +310,23 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
       }
       if (bodySucceeded > 0) {
         okSources++;
+        okSourceNames.add(name);
         onLog?.call('[+] $name 解析出 $got 个节点。');
       } else {
         failedSources++;
+        failedSourceNames.add(name);
         onLog?.call('[-] $name：所有 URL 均拉取失败或未解析出节点。');
       }
     }
 
   if (rawNodes.isEmpty) {
-    return (nodes: <String>[], okSources: okSources, failedSources: failedSources);
+    return (
+      nodes: <String>[],
+      okSources: okSources,
+      failedSources: failedSources,
+      okSourceNames: okSourceNames,
+      failedSourceNames: failedSourceNames,
+    );
   }
 
   final hosts = <String>{for (final r in rawNodes) r.host};
@@ -346,7 +370,13 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
   }
 
   onLog?.call('订阅获取完成：成功 $okSources 个源，失败 $failedSources 个源，共 ${rawNodes.length} 个节点，输出 ${nodes.length} 个。');
-  return (nodes: nodes, okSources: okSources, failedSources: failedSources);
+  return (
+    nodes: nodes,
+    okSources: okSources,
+    failedSources: failedSources,
+    okSourceNames: okSourceNames,
+    failedSourceNames: failedSourceNames,
+  );
 }
 
 /// 将订阅转换结果写入独立文件（LF 换行，便于 git 处理）。
