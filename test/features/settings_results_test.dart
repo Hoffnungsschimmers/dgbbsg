@@ -57,34 +57,26 @@ void main() {
     });
   });
 
-  group('filterByFacets / countFacets', () {
+  group('filterByCountries / countFacets', () {
     final rows = [
       ResultRow('1.1.1.1:443#US CM 洛杉矶 01'),
-      ResultRow('2.2.2.2:443#JP 天诚 Cloudflare 东京'),
-      ResultRow('3.3.3.3:443#US 洛璃 圣何塞'),
+      ResultRow('2.2.2.2:443#JP 洛璃 东京 02'),
+      ResultRow('3.3.3.3:443#US CM 圣何塞 03'),
     ];
-    const names = ['CM', '天诚 Cloudflare', '洛璃'];
-    String srcOf(ResultRow r) => detectSource(r.source, names);
 
-    test('两个集合都为空时原样返回', () {
-      expect(filterByFacets(rows), rows);
+    test('集合为空时原样返回', () {
+      expect(filterByCountries(rows), rows);
     });
     test('按国家码筛选', () {
-      final out = filterByFacets(rows, countries: {'US'});
-      expect(out.map((e) => e.ipPort), ['1.1.1.1:443', '3.3.3.3:443']);
-    });
-    test('按来源多选筛选（含空格的源名整体命中）', () {
-      final out = filterByFacets(rows, sources: {'天诚 Cloudflare', '洛璃'}, sourceOf: srcOf);
-      expect(out.map((e) => e.ipPort), ['2.2.2.2:443', '3.3.3.3:443']);
-    });
-    test('国家与来源是「且」关系', () {
-      final out = filterByFacets(rows, countries: {'US'}, sources: {'洛璃'}, sourceOf: srcOf);
-      expect(out.single.ipPort, '3.3.3.3:443');
+      expect(filterByCountries(rows, countries: {'US'}).map((e) => e.ipPort),
+          ['1.1.1.1:443', '3.3.3.3:443']);
+      expect(filterByCountries(rows, countries: {'US', 'JP'}).length, 3);
+      expect(filterByCountries(rows, countries: {'XX'}), isEmpty);
     });
     test('countFacets 统计行数并保持首次出现顺序', () {
-      expect(countFacets(rows.map((r) => nodeCountry(r.node))).keys.toList(), ['US', 'JP']);
-      expect(countFacets(rows.map((r) => nodeCountry(r.node))), {'US': 2, 'JP': 1});
-      expect(countFacets(rows.map(srcOf)), {'CM': 1, '天诚 Cloudflare': 1, '洛璃': 1});
+      final facets = countFacets(rows.map((r) => nodeCountry(r.node)));
+      expect(facets.keys.toList(), ['US', 'JP']);
+      expect(facets, {'US': 2, 'JP': 1});
     });
   });
 }

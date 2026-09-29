@@ -101,24 +101,11 @@ List<ResultRow> parseResultLines(String text) {
   return rows;
 }
 
-/// 按国家码 / 来源集合过滤行；集合为空表示该维度不限。
-/// [sourceOf] 决定每行归属的来源名（结果页传入按配置源名判定的函数），
-/// 省略时退化为整段注释尾部。
-List<ResultRow> filterByFacets(
-  List<ResultRow> rows, {
-  Set<String> countries = const {},
-  Set<String> sources = const {},
-  String Function(ResultRow row)? sourceOf,
-}) {
-  if (countries.isEmpty && sources.isEmpty) return rows;
-  return rows.where((r) {
-    if (countries.isNotEmpty && !countries.contains(nodeCountry(r.node))) return false;
-    if (sources.isNotEmpty) {
-      final src = sourceOf != null ? sourceOf(r) : r.source;
-      if (!sources.contains(src)) return false;
-    }
-    return true;
-  }).toList();
+/// 按国家码集合过滤行；集合为空表示不限。
+/// 只做国家维度：来源名在真实订阅数据里过于零散，不足以分类。
+List<ResultRow> filterByCountries(List<ResultRow> rows, {Set<String> countries = const {}}) {
+  if (countries.isEmpty) return rows;
+  return rows.where((r) => countries.contains(nodeCountry(r.node))).toList();
 }
 
 /// 统计各取值的行数（筛选芯片上的计数），保持首次出现顺序。

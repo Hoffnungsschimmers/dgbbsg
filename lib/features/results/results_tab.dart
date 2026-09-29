@@ -12,7 +12,6 @@ import '../../core/config/app_config.dart';
 import '../../core/export/result_exporter.dart';
 import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
-import '../../core/subscription/subscription_converter.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
 import 'result_state.dart';
@@ -34,9 +33,10 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
   int _sortCol = 0;
   bool _sortAsc = true;
 
-  // 筛选：集合为空 = 该维度不限；分组仅在非编辑模式下生效。
+  // 筛选：集合为空 = 不限；分组仅在非编辑模式下生效。
+  // 只做国家维度：真实订阅数据里来源名千奇百怪（大量行提不出国家码时，
+  // 注释首段就是原始节点名），按来源分类会炸出上百个芯片，没有实用价值。
   final Set<String> _fCountries = {};
-  final Set<String> _fSources = {};
   bool _groupByCountry = false;
 
   @override
@@ -243,17 +243,10 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
 
     final rows = state.rows;
     final filteredRows = state.filteredRows;
-    // 来源归属依赖配置里的源名：源名可能含空格，靠前缀匹配才能整体命中。
-    final knownSources =
-        cfg == null ? const <String>[] : collectSubscriptionTasks(cfg).map((e) => e.$1).toList();
-    String srcOf(ResultRow r) => detectSource(r.source, knownSources);
-    final shownRows = filterByFacets(filteredRows,
-        countries: _fCountries, sources: _fSources, sourceOf: srcOf);
+    final shownRows = filterByCountries(filteredRows, countries: _fCountries);
     final sortedRows = _sortRows(shownRows);
-    // 芯片计数基于「搜索后、维度筛选前」的行集，点选时数字即预期结果。
+    // 芯片计数基于「搜索后、筛选前」的行集，点选时数字即预期结果。
     final countryFacets = countFacets(filteredRows.map((r) => nodeCountry(r.node)));
-    final sourceFacets = countFacets(filteredRows.map(srcOf));
-    final filtering = _fCountries.isNotEmpty || _fSources.isNotEmpty;
 
     return LayoutBuilder(
       builder: (ctx, constraints) {
@@ -440,10 +433,8 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                   ),
                   const SizedBox(height: 16),
 
-                  // ── 筛选区：国家 / 来源芯片 + 按国家分组开关 ──
-                  if (rows.isNotEmpty &&
-                      !_rawView &&
-                      (countryFacets.length > 1 || sourceFacets.length > 1)) ...[
+                  // ── 筛选区：国家芯片 + 按国家分组开关 ──
+                  if (rows.isNotEmpty && !_rawView && countryFacets.length > 1) ...[
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
@@ -464,22 +455,6 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                               }
                             }),
                           ),
-                        if (sourceFacets.length > 1)
-                          SizedBox(width: 6, height: 18, child: VerticalDivider(color: t.border, thickness: 1)),
-                        for (final e in sourceFacets.entries)
-                          FilterChip(
-                            visualDensity: VisualDensity.compact,
-                            label: Text('${e.key} ${e.value}', style: const TextStyle(fontSize: 12)),
-                            selected: _fSources.contains(e.key),
-                            tooltip: '来源名取自订阅配置的标签；含空格的源名按前缀整体匹配',
-                            onSelected: (on) => setState(() {
-                              if (on) {
-                                _fSources.add(e.key);
-                              } else {
-                                _fSources.remove(e.key);
-                              }
-                            }),
-                          ),
                         if (!editMode)
                           FilterChip(
                             visualDensity: VisualDensity.compact,
@@ -488,15 +463,12 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                             selected: _groupByCountry,
                             onSelected: (on) => setState(() => _groupByCountry = on),
                           ),
-                        if (filtering)
+                        if (_fCountries.isNotEmpty)
                           ActionChip(
                             visualDensity: VisualDensity.compact,
                             avatar: const Icon(Icons.clear, size: 16),
                             label: const Text('清除筛选', style: TextStyle(fontSize: 12)),
-                            onPressed: () => setState(() {
-                              _fCountries.clear();
-                              _fSources.clear();
-                            }),
+                            onPressed: () => setState(() => _fCountries.clear()),
                           ),
                       ],
                     ),

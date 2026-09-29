@@ -33,13 +33,15 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('筛选芯片按国家/来源显示行数', (tester) async {
+  testWidgets('只显示国家筛选芯片，不再提供来源分类', (tester) async {
     await pump(tester, sampleRows());
 
     expect(find.text('US 2'), findsOneWidget);
     expect(find.text('JP 1'), findsOneWidget);
-    expect(find.text('CM 2'), findsOneWidget);
-    expect(find.text('洛璃 1'), findsOneWidget);
+    // 来源维度对真实订阅数据不成立（大量行提不出国家码时首段就是原始节点名），
+    // 曾炸出上百个芯片，已移除。
+    expect(find.text('CM 2'), findsNothing);
+    expect(find.text('洛璃 1'), findsNothing);
   });
 
   testWidgets('点国家芯片后表格只剩该国家的行', (tester) async {
