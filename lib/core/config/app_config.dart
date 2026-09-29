@@ -23,7 +23,6 @@ class AppConfig {
   // ============ 落地检测与输出 ============
   final String landingOutputFile; // 最终结果文件（落地检测写回 + 推送目标，默认 addressesapi_top.txt）
   final bool subInsecure; // 跳过订阅抓取时的 TLS 证书校验（默认 false，安全默认）
-  final String landingProxy; // 落地检测专用代理（如 '127.0.0.1:7890'），为空则跟随系统代理
 
   // ============ GitHub 推送（独立的优选结果仓） ============
   final String githubToken;
@@ -70,7 +69,6 @@ class AppConfig {
     this.subFetchRetryDelay = 2.0,
     this.landingOutputFile = 'addressesapi_top.txt',
     this.subInsecure = false,
-    this.landingProxy = '',
     this.githubToken = '',
     this.githubRepo = 'Hoffnungsschimmers/mnscn',
     this.githubBranch = 'main',
@@ -130,7 +128,6 @@ class AppConfig {
       subInsecure: pick('SUB_INSECURE', false),
       // 新键优先；旧键 SUB_LATENCY_OUTPUT_FILE 兜底（延迟优选已移除，兼容历史配置）。
       landingOutputFile: pick('LANDING_OUTPUT_FILE', pick('SUB_LATENCY_OUTPUT_FILE', 'addressesapi_top.txt')),
-      landingProxy: pick('LANDING_PROXY', ''),
       githubToken: pick('GITHUB_TOKEN', ''),
       githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/mnscn'),
       githubBranch: pick('GITHUB_BRANCH', 'main'),
@@ -167,7 +164,6 @@ class AppConfig {
         'SUB_FETCH_RETRY_DELAY': subFetchRetryDelay,
         'SUB_INSECURE': subInsecure,
         'LANDING_OUTPUT_FILE': landingOutputFile,
-        'LANDING_PROXY': landingProxy,
         'GITHUB_REPO': githubRepo,
         'GITHUB_BRANCH': githubBranch,
         'SUB_AUTO_UPDATE_ENABLED': subAutoUpdateEnabled,
@@ -200,7 +196,6 @@ class AppConfig {
     double? subFetchRetryDelay,
     String? landingOutputFile,
     bool? subInsecure,
-    String? landingProxy,
     String? githubToken,
     String? githubRepo,
     String? githubBranch,
@@ -250,7 +245,6 @@ class AppConfig {
       webdavAutoSync: webdavAutoSync ?? this.webdavAutoSync,
       webdavAutoSyncIntervalMin:
           webdavAutoSyncIntervalMin ?? this.webdavAutoSyncIntervalMin,
-      landingProxy: landingProxy ?? this.landingProxy,
       guiTheme: guiTheme ?? this.guiTheme,
       hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );

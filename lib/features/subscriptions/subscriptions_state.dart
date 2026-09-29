@@ -180,12 +180,12 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   /// 独立落地检测：对当前结果文件中的每个 IP 做 cdn-cgi/trace，
   /// 用真实 POP 覆盖国家码后写回落地输出文件（默认 `landingOutputFile`）。
   ///
-  /// 流程语义（对应用户操作）：
-  /// 1. 需要“开代理时的落地”→ 先开代理再点检测（经系统代理或配置的落地代理）；
-  /// 2. 需要“当前网络直连落地”→ 关代理后点检测（强制直连）。
-  /// [useProxy] 为 true 时经代理（优先配置的落地代理，否则系统代理），
-  /// 为 false 时强制直连。返回 (成功数, 总数)。
-  Future<(int, int)> runLandingCheck({required bool useProxy}) async {
+  /// 始终**强制直连**：产品只需要「当前网络的实际落地」（用户 2026-09-29 定稿，
+  /// 「代理测落地」与 `landingProxy` 配置已删除）。注意若开着虚拟网卡（TUN），
+  /// 流量仍可能被代理客户端接管，此时结果反映的是分流规则决定的出口，
+  /// 因此检测开始时会先探测并打印本次连接的实际出口身份（见 [probeEgress]）。
+  /// 返回 (成功数, 总数)。
+  Future<(int, int)> runLandingCheck() async {
     if (state.running) return (0, 0);
     _cancelRequested = false;
     state = state.copyWith(running: true, currentAction: RunAction.landing);
@@ -211,13 +211,17 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         final ep = parseEndpoint(n);
         if (ep != null) ipOfNode.putIfAbsent(ep.$1, () => n);
       }
-      String? proxy;
-      if (useProxy) {
-        proxy = cfg.landingProxy.trim().isNotEmpty ? cfg.landingProxy.trim() : _systemProxy;
+      // 先探明本次连接的实际出口：开着虚拟网卡（TUN）时「直连」仍可能被代理客户端
+      // 按规则接管，那测到的就是那个出口的落地。把出口身份打出来，这轮结果才说得清。
+      final egress = await probeEgress();
+      if (egress == null) {
+        logger.warning('出口身份探测失败（cloudflare.com/cdn-cgi/trace 无响应）：本轮落地出口未知');
+      } else {
+        logger.info('本次出口：${egress.ip} → Cloudflare 判给 '
+            '${egress.colo.isEmpty ? '?' : egress.colo}'
+            '（若与你宽带实际的公网 IP 不同，说明流量被代理接管）');
       }
-      logger.info(useProxy
-          ? '开始落地检测（经代理 ${proxy ?? '无可用代理，直连替代'}）：${ipOfNode.length} 个独立 IP'
-          : '开始落地检测（直连，当前网络真实落地）：${ipOfNode.length} 个独立 IP');
+      logger.info('开始落地检测（直连，当前网络的实际落地）：${ipOfNode.length} 个独立 IP');
       final landings = <String, String>{};
       final traceFailed = <String>[]; // trace 查不到落地的 IP（多为非 CF 直连 IP）
       var done = 0;
@@ -229,7 +233,6 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         final landing = await geolocateCfIp(
           entry.key,
           timeout: const Duration(milliseconds: 4000),
-          proxy: proxy,
         ).timeout(const Duration(seconds: 12), onTimeout: () => null);
         done++;
         if (landing != null && landing.country.isNotEmpty) {
@@ -263,7 +266,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         }
         if (needQuery.isNotEmpty) {
           logger.info('  批量查询 ${needQuery.length} 个 IP 的归属地（ip-api.com）…');
-          final geo = await geolocateIpCountryBatch(needQuery, proxy: proxy);
+          final geo = await geolocateIpCountryBatch(needQuery);
           geo.forEach((ip, cc) {
             landings[ip] = cc;
             cache[ip] = cc;
@@ -286,7 +289,10 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       // 用真实落地覆盖国家码后写回同一文件，并刷新结果页。
       final outPath = await _resolve(cfg.landingOutputFile);
       final updated = nodes.map((n) => applyRealLanding(n, landings)).toList();
-      await writeSubOutput(updated, outPath);
+      await writeSubOutput(updated, outPath, extraMeta: {
+        if (egress != null) 'egress_ip': egress.ip,
+        if (egress != null && egress.colo.isNotEmpty) 'egress_colo': egress.colo,
+      });
       await ref.read(resultProvider.notifier).loadFile(outPath);
       // 按国家分组汇总，方便按国家/地区分类使用。
       final groups = <String, int>{};

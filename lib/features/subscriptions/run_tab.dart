@@ -33,9 +33,9 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
     }
   }
 
-  /// 落地检测：[useProxy] 为 true 表示开代理测落地，为 false 表示直连测落地。
-  Future<void> _runLandingAndNotify(bool useProxy) async {
-    final (ok, total) = await ref.read(subProvider.notifier).runLandingCheck(useProxy: useProxy);
+  /// 落地检测：直连检测当前网络的真实落地。
+  Future<void> _runLandingAndNotify() async {
+    final (ok, total) = await ref.read(subProvider.notifier).runLandingCheck();
     if (!mounted) return;
     if (total == 0) {
       AppToast.show(context, '落地检测：无可用节点，详见日志', success: false);
@@ -120,20 +120,13 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
             alignment: WrapAlignment.end,
             children: [
               OutlinedButton.icon(
-                onPressed: () => _runLandingAndNotify(true),
+                onPressed: _runLandingAndNotify,
                 icon: const Tooltip(
-                  message: '开代理后点此：经代理检测每个 IP 的落地',
+                  message: '直连检测当前网络的真实落地。注意：开着虚拟网卡（TUN）时，'
+                      '结果取决于代理客户端对这些 IP 的分流规则，详见运行日志里的出口身份。',
                   child: Icon(Icons.public, size: 18),
                 ),
-                label: const Text('代理测落地'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _runLandingAndNotify(false),
-                icon: const Tooltip(
-                  message: '关代理后点此：直连检测当前网络的真实落地',
-                  child: Icon(Icons.public_outlined, size: 18),
-                ),
-                label: const Text('直连测落地'),
+                label: const Text('测落地'),
               ),
               FilledButton.icon(
                 onPressed: _runSubscriptionAndNotify,

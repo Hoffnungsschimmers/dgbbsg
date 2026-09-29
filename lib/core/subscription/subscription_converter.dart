@@ -380,8 +380,13 @@ Future<({
 }
 
 /// 将订阅转换结果写入独立文件（LF 换行，便于 git 处理）。
-/// 同时写入 .json 旁文件记录生成时间和节点数。
-Future<void> writeSubOutput(List<String> nodes, String outputFile) async {
+/// 同时写入 .json 旁文件记录生成时间和节点数；[extraMeta] 追加到旁文件
+/// （如落地检测写入的出口身份 egress_ip / egress_colo）。
+Future<void> writeSubOutput(
+  List<String> nodes,
+  String outputFile, {
+  Map<String, Object?> extraMeta = const {},
+}) async {
   final f = File(outputFile);
   await f.create(recursive: true);
   final sink = f.openWrite(encoding: utf8, mode: FileMode.writeOnly);
@@ -391,11 +396,12 @@ Future<void> writeSubOutput(List<String> nodes, String outputFile) async {
   await sink.flush();
   await sink.close();
 
-  // 写入 .json 旁文件（生成时间 + 节点数）
+  // 写入 .json 旁文件（生成时间 + 节点数 + 调用方附加元数据）
   final ts = DateTime.now().toString().substring(0, 19);
   final jsonFile = File('${f.path}.json');
   await jsonFile.writeAsString(jsonEncode({
     'generated_at': ts,
     'node_count': nodes.length,
+    ...extraMeta,
   }));
 }

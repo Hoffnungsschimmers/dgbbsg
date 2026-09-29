@@ -252,31 +252,5 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump();
     });
-
-    testWidgets('落地检测区块展示代理输入框', (tester) async {
-      await pumpTab(tester);
-
-      await tester.scrollUntilVisible(find.text('落地检测'), 300,
-          scrollable: find.byType(Scrollable).first);
-      await tester.pumpAndSettle();
-      expect(find.text('落地检测'), findsOneWidget);
-
-      // 落地代理输入框可编辑保存（trim 后落盘）
-      await tester.scrollUntilVisible(
-          find.text('落地检测代理（开代理测落地时用，空=跟随系统代理）'), 300,
-          scrollable: find.byType(Scrollable).first);
-      await tester.pumpAndSettle();
-      final field = _fieldByHint('127.0.0.1:7890');
-      await tester.enterText(field, '  127.0.0.1:7890  ');
-      await tester.pumpAndSettle();
-
-      final container =
-          ProviderScope.containerOf(tester.element(find.byType(ConfigTab)));
-      expect(container.read(configProvider).valueOrNull?.landingProxy,
-          '127.0.0.1:7890');
-
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump();
-    });
   });
 }

@@ -250,6 +250,48 @@ Future<CfLanding?> geolocateCfIp(
   return null;
 }
 
+/// 本次连接的出口身份（Cloudflare 视角）：[ip] 是它看到的源地址，
+/// [colo] 是它把这个请求判给了哪个 POP。
+class EgressInfo {
+  final String ip;
+  final String colo;
+  const EgressInfo({required this.ip, required this.colo});
+}
+
+/// 从 cdn-cgi/trace 响应文本解析出口身份；缺 `ip=` 时返回 null。
+EgressInfo? parseEgressTrace(String body) {
+  final ip = RegExp(r'^ip=(\S+)$', multiLine: true).firstMatch(body)?.group(1);
+  if (ip == null || ip.isEmpty) return null;
+  final colo = RegExp(r'^colo=(\w+)$', multiLine: true).firstMatch(body)?.group(1) ?? '';
+  return EgressInfo(ip: ip, colo: colo);
+}
+
+/// 向 Cloudflare 官方 trace 端点请求一次，得到**本次连接的实际出口**。
+///
+/// 为什么需要：落地检测强制直连，但若开着虚拟网卡（TUN），流量仍可能被代理
+/// 客户端按规则接管 —— 那这一轮测到的落地属于那个出口，而不是本机宽带。先探一次
+/// 就能把这轮结果的归属说清楚。失败返回 null，不抛异常。
+Future<EgressInfo?> probeEgress({
+  Duration timeout = const Duration(seconds: 6),
+  String? proxy,
+}) async {
+  final client = HttpClient()..connectionTimeout = timeout;
+  if (proxy != null && proxy.isNotEmpty) {
+    client.findProxy = (uri) => 'PROXY $proxy';
+  }
+  try {
+    final req =
+        await client.getUrl(Uri.parse('https://www.cloudflare.com/cdn-cgi/trace'));
+    final resp = await req.close().timeout(timeout);
+    final body = await resp.transform(SystemEncoding().decoder).join();
+    return parseEgressTrace(body);
+  } catch (_) {
+    return null;
+  } finally {
+    client.close(force: true);
+  }
+}
+
 /// 批量通过 cdn-cgi/trace 识别多个 IP 的地区，复用单个 [HttpClient]。
 ///
 /// 比逐个调用 [geolocateCfIp] 更高效：避免为每个 IP 创建/销毁 HttpClient。

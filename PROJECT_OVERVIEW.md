@@ -108,7 +108,7 @@ lib/
 │   ├── subscriptions/
 │   │   ├── config_tab.dart          配置页：订阅输入（node/url/both 模式）、抓取参数、
 │   │   │                            落地检测（代理）、定时更新、GitHub、Webhook、WebDAV、外观
-│   │   ├── run_tab.dart             运行页：获取订阅 / 代理测落地 / 直连测落地
+│   │   ├── run_tab.dart             运行页：获取订阅 / 测落地（强制直连，先打印出口身份）
 │   │   │                            按钮 + 实时日志
 │   │   └── subscriptions_state.dart SubscriptionsNotifier：获取订阅与落地检测两动作的
 │   │                                编排与取消、自动更新定时器（5–480 分钟）、Webhook 触发
@@ -123,7 +123,7 @@ lib/
 │                                    count_up_text/section_collapsible
 └── (数据文件) addressesapi.txt / addressesapi_top.txt  转换与优选输出（工作区根目录）
 
-test/                        31 个测试文件、282 个用例（app/core/features 分层）
+test/                        31 个测试文件、287 个用例（app/core/features 分层）
 docs/superpowers/plans/      历史开发计划文档（2026-07 ~ 2026-08）
 history/                     结果文件时间戳备份（2026-07-17 的 16 份 ip.txt 快照）
 scripts/build_windows.ps1    Windows 发布脚本（MSIX + 便携 zip）
@@ -150,14 +150,14 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 提不出国家码且未配默认国家码时写占位码 `UN`（`unknownCountryTag`），原始名只出现在备注里，落地检测会用真实落地码覆盖；
 同 ip:port 去重仍只保留首次出现那条（含其来源名与备注）；IPv6 自动方括号包裹（`bracketIpv6Host`）；兼容旧 `#CC@来源` 格式读取。
 
-### 5.2 落地检测（「代理测落地」/「直连测落地」）
+### 5.2 落地检测（只有「测落地」，强制直连）
 
-`runLandingCheck({required bool useProxy})`（`subscriptions_state.dart`）——延迟优选移除后，本步骤是 `addressesapi_top.txt` 的唯一生产者：
+`runLandingCheck()`（`subscriptions_state.dart`）——延迟优选移除后，本步骤是 `addressesapi_top.txt` 的唯一生产者：
 
 - 读取当前结果文件（优先结果页已加载文件，否则 `landingOutputFile`），对每个**独立 IP**（同 IP 多端口只查一次）调用 `geolocateCfIp`：请求 `http(s)://IP/cdn-cgi/trace`（带 Host 头），解析 `colo=` 机场码 → 国家码。
-- `useProxy=true` 时经「落地检测代理」（`AppConfig.landingProxy`，空则系统代理）；`false` 强制直连。
+- **始终直连**：「代理测落地」按钮与 `AppConfig.landingProxy` 已删除（2026-09-29 用户定稿：只需要当前网络的实际落地）。旧键 `LANDING_PROXY` 读取时忽略、也不会再写回（有回归测试）。
+- **出口身份探针**：检测前先请求 `https://www.cloudflare.com/cdn-cgi/trace`（`probeEgress` / `parseEgressTrace`，`core/net/ip.dart`），日志打印「本次出口 `<ip>` → Cloudflare 判给 `<colo>`」，并把 `egress_ip` / `egress_colo` 写进 `*_top.txt.json` 旁文件。动机：开着虚拟网卡（TUN）时「直连」并不等于本机宽带出口 —— 流量是否被代理接管取决于客户端对该 IP 的分流规则，App 层无法可靠绕过（绑源地址改变不了 Windows 的路由选择，anycast 的 colo 又由 BGP 决定）。给出出口身份，多轮测量的结果才可归属、可对比。探测失败只记 warning，不影响检测。
 - **串行执行**（防 CF 限流），支持取消；完成后用 `applyRealLanding`（`core/net/endpoint.dart`）覆盖国家码，经 `writeSubOutput` 写入 `landingOutputFile`（txt + `.json` 旁文件，刷新结果页生成时间），日志按 `IP → 机场（国家）` 输出并按国家分组汇总。
-- 典型用法：开代理点「代理测落地」→ 关代理点「直连测落地」，对比同一 IP 的两种落地；随后在结果页/同步页把 `*_top.txt` 推送 GitHub。
 
 ### 5.3 同步与通知
 
@@ -171,7 +171,7 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 `AppConfig`（`lib/core/config/app_config.dart`）——普通 Dart 类 + 手写序列化，无 codegen。字段分组：
 
 - **订阅转换**：`subInputMode`（node/url/both）、`subUrls`（支持 `标签|URL` 前缀）、`subGenerators`（`名称|域名|secret`）、`subNodeHost/subNodeUuid`（BEST_SUB 参数）、`subOutputFile`（默认 `addressesapi.txt`）、`subDefaultCountry`、`subResolveDomain`、抓取超时/重试参数、`subInsecure`（跳过 TLS 校验，默认 false）
-- **落地检测与输出**：`landingOutputFile`（默认 `addressesapi_top.txt`，落地检测写回 + GitHub/WebDAV 推送目标；旧键 `SUB_LATENCY_OUTPUT_FILE` 读取兜底）、`landingProxy`（落地检测代理，空=系统代理）
+- **落地检测与输出**：`landingOutputFile`（默认 `addressesapi_top.txt`，落地检测写回 + GitHub/WebDAV 推送目标；旧键 `SUB_LATENCY_OUTPUT_FILE` 读取兜底）。落地检测**无代理参数**：`landingProxy` 已删除，旧键 `LANDING_PROXY` 读取时忽略
 - **GitHub**：`githubToken`、`githubRepo`（默认 `Hoffnungsschimmers/mnscn`，fromJson 兜底 `cf-ip`，两者分叉见 §10）、`githubBranch`
 - **自动更新**：开关 + 间隔（5–480 分钟），到点自动跑订阅转换
 - **Webhook / WebDAV / 外观 / 引导**：见 §5.3 与 `guiTheme`、`hasCompletedOnboarding`
@@ -193,7 +193,7 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 ## 8. 测试
 
-- 31 个测试文件，**282 个用例全绿**（基线：`flutter test` 282/282；`flutter analyze` 全仓 0 error 0 warning、177 条 info）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
+- 31 个测试文件，**287 个用例全绿**（基线：`flutter test` 287/287；`flutter analyze` 全仓 0 error 0 warning、177 条 info）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
 - 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、国家筛选与分组（`settings_results_test.dart` 的 `filterByCountries`/`countFacets`、`results_filter_chips_test.dart` 的芯片筛选、分组渲染与「不再有来源芯片」回归断言）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
 - 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。延迟片段**只认行尾形态**（`50.00 ms` / `56.00ms`），行中出现而后面还有文字的当作备注原文，避免整段被吞。
 - 测试全部入库（`responsive_narrow_test.dart`、`ip_count_box_test.dart`、`config_backfill_test.dart` 等曾长期只在工作区，现已随 `3b4eb6e` 提交）。

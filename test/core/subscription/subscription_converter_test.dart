@@ -321,5 +321,23 @@ void main() {
       expect(ResultState(rows: parseResultLines(lines.join('\n'))).toText().trimRight(),
           lines.join('\n'));
     });
+
+    test('旁文件可携带出口身份等附加元数据', () async {
+      final dir = await Directory.systemTemp.createTemp('cfnb_meta');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = '${dir.path}${Platform.pathSeparator}addressesapi_top.txt';
+
+      await writeSubOutput(['1.1.1.1:443#HK 麒麟 香港 01'], file, extraMeta: {
+        'egress_ip': '203.0.113.7',
+        'egress_colo': 'LAX',
+      });
+
+      final meta =
+          jsonDecode(await File('$file.json').readAsString()) as Map<String, dynamic>;
+      expect(meta['egress_ip'], '203.0.113.7');
+      expect(meta['egress_colo'], 'LAX');
+      expect(meta['node_count'], 1);
+      expect(meta['generated_at'], isNotNull);
+    });
   });
 }

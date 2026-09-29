@@ -41,8 +41,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   final _wdIntervalFocus = FocusNode();
   final _webhookUrlCtl = TextEditingController();
   final _webhookUrlFocus = FocusNode();
-  final _landingProxyCtl = TextEditingController();
-  final _landingProxyFocus = FocusNode();
 
   Timer? _saveTimer;
   AppConfig? _pendingCfg;
@@ -96,8 +94,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _wdIntervalFocus.dispose();
     _webhookUrlCtl.dispose();
     _webhookUrlFocus.dispose();
-    _landingProxyCtl.dispose();
-    _landingProxyFocus.dispose();
     _saveTimer?.cancel();
     super.dispose();
   }
@@ -127,7 +123,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _syncIf(_wdPassCtl, _wdPassFocus, cfg.webdavPassword);
     _syncIf(_wdIntervalCtl, _wdIntervalFocus, cfg.webdavAutoSyncIntervalMin.toString());
     _syncIf(_webhookUrlCtl, _webhookUrlFocus, cfg.webhookUrl);
-    _syncIf(_landingProxyCtl, _landingProxyFocus, cfg.landingProxy);
     _syncIf(_landingOutCtl, _landingOutFocus, cfg.landingOutputFile);
     _isSyncing = false;
   }
@@ -213,8 +208,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                     _buildNodeParamsSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildFetchSection(context, cfg),
-                    const SizedBox(height: 12),
-                    _buildLandingSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildWebhookSection(context, cfg),
                     const SizedBox(height: 12),
@@ -1053,36 +1046,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     );
   }
 
-  // ═══════════════════════════════════════════════════════
-  // ③ 落地检测
-  // ═══════════════════════════════════════════════════════
-
-  /// 落地检测参数：代理设置。字段直连 [AppConfig]，与 subscriptions_state.runLandingCheck 的读取一致。
-  Widget _buildLandingSection(BuildContext context, AppConfig cfg) {
-    final t = AppThemeExt.of(context);
-    return SectionCollapsible(
-      title: '落地检测',
-      icon: Icons.public,
-      initiallyExpanded: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _compactTextField(
-            label: '落地检测代理（开代理测落地时用，空=跟随系统代理）',
-            controller: _landingProxyCtl,
-            focusNode: _landingProxyFocus,
-            onChanged: (v) => _save(cfg.copyWith(landingProxy: v.trim())),
-            hint: '127.0.0.1:7890',
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '运行页「代理测落地」经此代理检测，「直连测落地」强制直连。',
-            style: TextStyle(fontSize: 12, color: t.textDim),
-          ),
-        ],
-      ),
-    );
-  }
+  // ③ 落地检测：无参数可配（强制直连），输出文件在「输出」区块设置。
 
   Widget _buildAutoUpdate(BuildContext context, AppConfig cfg) {
     final t = AppThemeExt.of(context);

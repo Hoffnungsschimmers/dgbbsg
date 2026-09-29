@@ -68,13 +68,9 @@ void main() {
       expect(round.webdavPassword, '');
     });
 
-    test('landing proxy roundtrip', () {
-      const c = AppConfig(landingProxy: '127.0.0.1:7890');
-      final json = c.toJson();
-      expect(json['LANDING_PROXY'], '127.0.0.1:7890');
-      final round = AppConfig.fromJson(json);
-      expect(round.landingProxy, '127.0.0.1:7890');
-      expect(const AppConfig().landingProxy, '');
+    test('已废弃的 LANDING_PROXY 键被忽略且不回写（落地检测只直连）', () {
+      final c = AppConfig.fromJson({'LANDING_PROXY': '127.0.0.1:7890'});
+      expect(c.toJson().containsKey('LANDING_PROXY'), isFalse);
     });
   });
 

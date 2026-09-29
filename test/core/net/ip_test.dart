@@ -64,4 +64,36 @@ void main() {
       expect(cfAirportToCountry('XXX'), '');
     });
   });
+
+  group('parseEgressTrace', () {
+    const full = 'ip=203.0.113.7\nts=1690000000.000\nvisit_scheme=https\n'
+        'colo=LAX\nsliver=none\nhttp=HTTP/1.1\ngeo=US\n';
+
+    test('解析出口 IP 与 colo', () {
+      final e = parseEgressTrace(full);
+      expect(e, isNotNull);
+      expect(e!.ip, '203.0.113.7');
+      expect(e.colo, 'LAX');
+    });
+
+    test('缺 colo 时仍返回出口 IP，colo 为空', () {
+      final e = parseEgressTrace('ip=1.2.3.4\ngeo=JP\n');
+      expect(e!.ip, '1.2.3.4');
+      expect(e.colo, '');
+    });
+
+    test('IPv6 出口地址（含冒号）也能解析', () {
+      expect(parseEgressTrace('ip=2606:4700::6812:3456\ncolo=FRA\n')!.ip,
+          '2606:4700::6812:3456');
+    });
+
+    test('缺 ip= 或空文本返回 null', () {
+      expect(parseEgressTrace('colo=LAX\ngeo=US\n'), isNull);
+      expect(parseEgressTrace(''), isNull);
+    });
+
+    test('ip= 只在行首匹配，不误读其它字段', () {
+      expect(parseEgressTrace('colo=LAX\nxip=9.9.9.9\n'), isNull);
+    });
+  });
 }
