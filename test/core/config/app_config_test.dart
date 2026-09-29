@@ -17,6 +17,12 @@ void main() {
       expect(c.githubRepo, 'Hoffnungsschimmers/mnscn');
     });
 
+    test('缺 GITHUB_REPO 键时兜底与构造函数默认一致', () {
+      // 曾出现构造函数用 mnscn、fromJson 兜底用 cf-ip 的分叉：
+      // 老配置没存过这个键时会被静默换成另一个仓库。
+      expect(AppConfig.fromJson({}).githubRepo, const AppConfig().githubRepo);
+    });
+
     test('dead fields removed', () {
       // 编译期保证：以下字段不应存在（构建即失败若引用了已删字段）
       expect(c, isA<AppConfig>());

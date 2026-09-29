@@ -380,7 +380,7 @@ class _OnboardingWizardState extends ConsumerState<OnboardingWizard> {
               controller: _repoCtl,
               style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
               decoration: InputDecoration(
-                hintText: 'Hoffnungsschimmers/cf-ip',
+                hintText: 'Hoffnungsschimmers/mnscn',
                 hintStyle: TextStyle(color: t.textDim, fontSize: 12),
                 filled: true,
                 fillColor: t.surface,

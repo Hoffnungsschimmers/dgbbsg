@@ -8,11 +8,11 @@ import '../net/proxy.dart';
 
 /// GitHub 文件推送（对应旧版 scripts/git_sync.ps1 的 ip 数据推送）。
 ///
-/// 推送到独立的 cf-ip 仓库（与代码仓库隔离）。使用 GitHub Contents API，
+/// 推送到独立的优选结果仓库（与代码仓库隔离）。使用 GitHub Contents API，
 /// 自动处理已存在文件的 sha（更新）或新建。token 通过参数传入，不落盘明文。
 class GithubPush {
   final String token;
-  final String repo; // 形如 "owner/cf-ip"
+  final String repo; // 形如 "owner/repo"
   final String branch;
   final Dio dio;
 

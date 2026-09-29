@@ -25,7 +25,7 @@ class AppConfig {
   final bool subInsecure; // 跳过订阅抓取时的 TLS 证书校验（默认 false，安全默认）
   final String landingProxy; // 落地检测专用代理（如 '127.0.0.1:7890'），为空则跟随系统代理
 
-  // ============ GitHub 推送（独立 cf-ip 仓） ============
+  // ============ GitHub 推送（独立的优选结果仓） ============
   final String githubToken;
   final String githubRepo;
   final String githubBranch;
@@ -132,7 +132,7 @@ class AppConfig {
       landingOutputFile: pick('LANDING_OUTPUT_FILE', pick('SUB_LATENCY_OUTPUT_FILE', 'addressesapi_top.txt')),
       landingProxy: pick('LANDING_PROXY', ''),
       githubToken: pick('GITHUB_TOKEN', ''),
-      githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/cf-ip'),
+      githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/mnscn'),
       githubBranch: pick('GITHUB_BRANCH', 'main'),
       subAutoUpdateEnabled: pick('SUB_AUTO_UPDATE_ENABLED', false),
       subAutoUpdateIntervalMin: pick('SUB_AUTO_UPDATE_INTERVAL_MIN', 60),

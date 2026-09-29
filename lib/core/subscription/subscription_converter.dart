@@ -30,9 +30,13 @@ bool _isSpamNode(String host) {
   return false;
 }
 
-/// 备注清洗：`#` 换成 `-`（行内 `#` 是国家码分隔符），换行与连续空格压成一个。
-String _cleanRemark(String s) =>
-    s.replaceAll('#', '-').replaceAll(RegExp(r'\s+'), ' ').trim();
+/// 提不出国家码时的占位国家码：保证国家码位永远是两位码，原始名只出现在备注里，
+/// 落地检测随后会用真实落地国家码覆盖它。
+const String unknownCountryTag = 'UN';
+
+/// 备注清洗：换行与连续空格压成一个。`#` 原样保留——行内只有第一个 `#` 是
+/// 结构性的（国家码分隔符），解析侧一律按首个 `#` 切分，后续 `#` 不影响读取。
+String _cleanRemark(String s) => s.replaceAll(RegExp(r'\s+'), ' ').trim();
 
 /// 原始节点名里已带来源名时剥掉，避免同一个名字在注释里出现两次。
 /// 只在「整段相同 / 开头 / 结尾」三种形态下剥离，不做子串替换。
@@ -229,7 +233,8 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
 /// 转换所有候选订阅器/订阅链接为标准节点列表（只按 IP+端口去重）。
 ///
 /// 输出行格式 `ip:port#国家码 来源名 原始节点备注`：国家码取自原始名，
-/// 原始名里剩下的部分（地区/线路/编号等）作为备注保留在行尾。
+/// 原始名里剩下的部分（地区/线路/编号等）作为备注保留在行尾；提不出国家码时
+/// 用配置默认国家码，仍为空则写占位码 [unknownCountryTag]。
 ///
 /// 返回记录：`nodes` 去重后的节点列表，`okSources` 解析出节点的源数，
 /// `failedSources` 拉取失败或未解析出节点的源数。[fetch] 注入真实 HTTP 拉取；
@@ -328,10 +333,11 @@ Future<({List<String> nodes, int okSources, int failedSources})> convertSubscrip
     // IPv6 需要方括号包裹
     final addr = ip.contains(':') ? '[$ip]' : ip;
     // 标准化国家码（中文名/三字母码 → 两位码），原始名中剩余部分留作备注；
-    // 无有效国家码时用默认国家码兜底。
+    // 提不出国家码时用配置的默认国家码兜底，仍没有则用占位码 UN
+    // （避免原始名挤进国家码位，落地检测会把它换成真实落地码）。
     final split = parser.splitLabel(r.name.trim());
     final remark = _stripSourceDup(_cleanRemark(split.remark), r.source);
-    final tag = split.cc ?? (defaultCc.isNotEmpty ? defaultCc : remark);
+    final tag = split.cc ?? (defaultCc.isNotEmpty ? defaultCc : unknownCountryTag);
     nodes.add([
       tag.isNotEmpty ? '$addr:${r.port}#$tag' : '$addr:${r.port}',
       r.source,

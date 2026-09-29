@@ -111,8 +111,8 @@ void main() {
       expect(nodes.length, 2);
       // 注释 = 国家码 + 来源名 + 原始节点备注
       expect(nodes, contains('1.1.1.1:443#US url 美国'));
-      // IDK 非真实国家码，默认国家为空时整串原始名留在注释首位，不重复出现
-      expect(nodes, contains('2.2.2.2:443#IDK url'));
+      // IDK 提不出国家码：国家码位写占位码 UN，原始名留在备注里
+      expect(nodes, contains('2.2.2.2:443#UN url IDK'));
       // 节点携带来源后缀，便于结果页/导出按源统计
       expect(nodes.every((n) => n.contains(' url')), isTrue);
       // 去重只看 ip:port：两个不同 host 解析到同一 IP 时折叠为一条。
@@ -247,7 +247,7 @@ void main() {
       expect(result.nodes, ['1.1.1.1:443#US 麒麟 美国 洛杉矶']);
     });
 
-    test('备注清洗：压缩空格、# 换成 -', () async {
+    test('备注清洗：压缩空格，# 原样保留', () async {
       final link = 'vless://u@node1.com:443#${Uri.encodeComponent('美国  洛杉矶#01')}';
       Future<String> fetch(String url, {String label = ''}) async => link;
       final result = await convertSubscriptions(
@@ -256,13 +256,14 @@ void main() {
         resolve: (host) async => '1.1.1.1',
         parser: parser,
       );
-      expect(result.nodes, ['1.1.1.1:443#US url 美国 洛杉矶-01']);
+      expect(result.nodes, ['1.1.1.1:443#US url 美国 洛杉矶#01']);
     });
 
     test('纯文本列表源同样保留原始备注', () async {
-      // bestcf 类 txt 列表：# 后是国家码 + 原始备注（第二个 # 会被清洗）。
+      // bestcf 类 txt 列表：# 后是国家码 + 原始备注；行内后续的 # 属备注原文，
+      // 只有第一个 # 是结构性的。
       Future<String> fetch(String url, {String label = ''}) async =>
-          '47.245.140.240:2087#US#洛杉矶-优化\n1.2.3.4#美国  圣何塞';
+          '47.245.140.240:2087#US#洛杉矶-优化\n1.2.3.4#美国  圣何塞\n5.6.7.8:443#US#粤#Cloudflare#2';
       final result = await convertSubscriptions(
         const AppConfig(subInputMode: 'url', subUrls: ['速递|https://a.ok/sub']),
         fetch: fetch,
@@ -272,6 +273,7 @@ void main() {
       expect(result.nodes, [
         '47.245.140.240:2087#US 速递 洛杉矶-优化',
         '1.2.3.4:443#US 速递 美国 圣何塞',
+        '5.6.7.8:443#US 速递 粤#Cloudflare#2',
       ]);
     });
   });
