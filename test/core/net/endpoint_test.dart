@@ -80,4 +80,28 @@ void main() {
       expect(nodeCountry('1.2.3.4:443#US 麒麟 美国 01'), 'US');
     });
   });
+
+  group('detectSource', () {
+    test('源名不含空格时取首段', () {
+      expect(detectSource('IDK 粤#Cloudflare#2', ['IDK', 'CM']), 'IDK');
+    });
+    test('源名含空格时靠前缀匹配整体命中', () {
+      expect(detectSource('天诚 Cloudflare 美国 01', ['天诚 Cloudflare', 'CM']), '天诚 Cloudflare');
+    });
+    test('未知源退化为第一个 token', () {
+      expect(detectSource('某源 洛杉矶 01', ['IDK']), '某源');
+    });
+    test('多个命中取最长，避免短名抢先', () {
+      expect(detectSource('CM Cloudflare 美国', ['C', 'CM Cloudflare']), 'CM Cloudflare');
+    });
+    test('大小写不敏感但返回配置里的写法', () {
+      expect(detectSource('cm 洛杉矶', ['CM']), 'CM');
+    });
+    test('整段等于源名时也匹配', () {
+      expect(detectSource('CM', ['CM']), 'CM');
+    });
+    test('空尾部返回空串', () {
+      expect(detectSource('', ['CM']), '');
+    });
+  });
 }

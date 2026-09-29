@@ -110,9 +110,10 @@ lib/
 │   │   │                            按钮 + 实时日志
 │   │   └── subscriptions_state.dart SubscriptionsNotifier：获取订阅与落地检测两动作的
 │   │                                编排与取消、自动更新定时器（5–480 分钟）、Webhook 触发
-│   ├── results/                     结果页：表格展示、搜索、编辑、IP 数量统计、
-│   │   │                            导出、推送 GitHub、地址选择器
+│   ├── results/                     结果页：表格展示、搜索、国家/来源筛选芯片、
+│   │   │                            按国家分组、编辑、IP 数量统计、
 │   │   ├── results_tab.dart / results_table.dart / result_state.dart
+│   │   │                            导出、推送 GitHub、地址选择器
 │   ├── github_sync/                 同步页：远端 *_top.txt 拉取比对、双向推送、节点增删改
 │   ├── webdav/webdav_sync_panel.dart    WebDAV 同步底部面板（AppBar 云图标入口）
 │   ├── onboarding/onboarding_wizard.dart  首启 4 步引导（欢迎/输入模式/GitHub/完成）
@@ -120,7 +121,7 @@ lib/
 │                                    count_up_text/section_collapsible
 └── (数据文件) addressesapi.txt / addressesapi_top.txt  转换与优选输出（工作区根目录）
 
-test/                        28 个测试文件、约 251 个用例（app/core/features 分层）
+test/                        30 个测试文件、281 个用例（app/core/features 分层）
 docs/superpowers/plans/      历史开发计划文档（2026-07 ~ 2026-08）
 history/                     结果文件时间戳备份（2026-07-17 的 16 份 ip.txt 快照）
 scripts/build_windows.ps1    Windows 发布脚本（MSIX + 便携 zip）
@@ -180,6 +181,7 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 - **响应式**：Material 3 断点——手机（<600dp）底部 NavigationBar，桌面/平板（≥600dp）左侧 NavigationRail；系统字号缩放限制在 0.85–1.3。
 - **4 个 Tab**：配置 / 运行 / 结果 / 同步（GitHub）。Tab 栈用 Stack + Offstage 保活，切换带 fade+slide 动画。
+- **结果页筛选与分组**（2026-09-29）：操作行下方是国家/来源筛选芯片，各带行数；同一维度内多选是「或」，两个维度之间是「且」，并与搜索框叠加，出现「清除筛选」。开启「按国家分组」后每个国家各渲染一张带组标题（国家码 + 中文名 + 数量）的表格；编辑模式不提供该开关，避免拖拽/删除的下标跨组错乱。来源归属由 `core/net/endpoint.dart` 的 `detectSource` 判定：先用配置里的源名做前缀匹配（含空格的源名可整体命中，多命中取最长），都不匹配时退化为第一个空白 token。
 - **桌面特性**：关窗隐藏到系统托盘（`setPreventClose`），托盘菜单可触发订阅IP；window_manager 管窗口（最小 800×600）。
 - **快捷键**（`shortcuts.dart`）：Tab 切换/循环、刷新结果、编辑模式、运行订阅、取消运行。
 - **首启引导**：4 步向导（欢迎 → 输入模式 → GitHub → 完成），仅弹一次。
@@ -187,10 +189,10 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 ## 8. 测试
 
-- 29 个测试文件，**265 个用例全绿**（基线：`flutter test` 265/265；`flutter analyze` 全仓 0 error 0 warning、177 条 info）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
-- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
-- 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。
-- 未跟踪的新测试：`responsive_narrow_test.dart`、`ip_count_box_test.dart`、`config_backfill_test.dart`——均针对工作区新代码编写，在当前工作区全部通过（HANDOVER 曾记录它们在干净 HEAD 上失败，属正常：它们验证的就是未提交的改动）。
+- 30 个测试文件，**281 个用例全绿**（基线：`flutter test` 281/281；`flutter analyze` 全仓 0 error 0 warning、177 条 info）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
+- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、来源名判定与筛选/分组（`endpoint_test.dart` 的 `detectSource`、`settings_results_test.dart` 的 `filterByFacets`/`countFacets`、`results_filter_chips_test.dart` 的芯片筛选与分组渲染）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
+- 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。延迟片段**只认行尾形态**（`50.00 ms` / `56.00ms`），行中出现而后面还有文字的当作备注原文，避免整段被吞。
+- 测试全部入库（`responsive_narrow_test.dart`、`ip_count_box_test.dart`、`config_backfill_test.dart` 等曾长期只在工作区，现已随 `3b4eb6e` 提交）。
 
 ## 9. 历史沿革
 

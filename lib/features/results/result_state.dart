@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cfnb_app/core/config/app_config.dart';
+import 'package:cfnb_app/core/net/endpoint.dart';
 import 'package:cfnb_app/core/net/ip.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
@@ -98,6 +99,35 @@ List<ResultRow> parseResultLines(String text) {
     rows.add(ResultRow(node, latency));
   }
   return rows;
+}
+
+/// 按国家码 / 来源集合过滤行；集合为空表示该维度不限。
+/// [sourceOf] 决定每行归属的来源名（结果页传入按配置源名判定的函数），
+/// 省略时退化为整段注释尾部。
+List<ResultRow> filterByFacets(
+  List<ResultRow> rows, {
+  Set<String> countries = const {},
+  Set<String> sources = const {},
+  String Function(ResultRow row)? sourceOf,
+}) {
+  if (countries.isEmpty && sources.isEmpty) return rows;
+  return rows.where((r) {
+    if (countries.isNotEmpty && !countries.contains(nodeCountry(r.node))) return false;
+    if (sources.isNotEmpty) {
+      final src = sourceOf != null ? sourceOf(r) : r.source;
+      if (!sources.contains(src)) return false;
+    }
+    return true;
+  }).toList();
+}
+
+/// 统计各取值的行数（筛选芯片上的计数），保持首次出现顺序。
+Map<String, int> countFacets(Iterable<String> values) {
+  final out = <String, int>{};
+  for (final v in values) {
+    out[v] = (out[v] ?? 0) + 1;
+  }
+  return out;
 }
 
 class ResultState {

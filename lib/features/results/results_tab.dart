@@ -11,6 +11,8 @@ import '../../app/theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/export/result_exporter.dart';
 import '../../core/net/endpoint.dart';
+import '../../core/net/ip.dart';
+import '../../core/subscription/subscription_converter.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
 import 'result_state.dart';
@@ -31,6 +33,11 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
 
   int _sortCol = 0;
   bool _sortAsc = true;
+
+  // 筛选：集合为空 = 该维度不限；分组仅在非编辑模式下生效。
+  final Set<String> _fCountries = {};
+  final Set<String> _fSources = {};
+  bool _groupByCountry = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -110,6 +117,74 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
     return sorted;
   }
 
+  /// 按国家分组的只读视图：每组一个带标题的表格卡片。
+  /// 编辑模式不参与分组（拖拽/删除的下标映射会跨组错乱）。
+  List<Widget> _buildCountryGroups(
+      BuildContext context, List<ResultRow> all, List<ResultRow> view) {
+    final t = AppThemeExt.of(context);
+    final groups = <String, List<ResultRow>>{};
+    for (final r in view) {
+      (groups[nodeCountry(r.node)] ??= <ResultRow>[]).add(r);
+    }
+    final entries = groups.entries.toList()
+      ..sort((a, b) {
+        if (a.key.isEmpty) return 1;
+        if (b.key.isEmpty) return -1;
+        final bySize = b.value.length.compareTo(a.value.length);
+        return bySize != 0 ? bySize : a.key.compareTo(b.key);
+      });
+
+    return [
+      for (final e in entries) ...[
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(color: t.accentSoft, borderRadius: t.radius),
+                child: Text(
+                  e.key.isEmpty ? '未知' : e.key,
+                  style: TextStyle(
+                      fontFamily: 'AppMono',
+                      fontSize: 12,
+                      color: t.text,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  [
+                    if (e.key.isNotEmpty) countryCodeToName(e.key),
+                    '${e.value.length} 个',
+                  ].where((s) => s.isNotEmpty).join(' · '),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: t.textDim),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        ResultTable(
+          rows: e.value,
+          sortCol: _sortCol,
+          sortAsc: _sortAsc,
+          onSort: (col) => setState(() {
+            if (_sortCol == col) {
+              _sortAsc = !_sortAsc;
+            } else {
+              _sortCol = col;
+              _sortAsc = true;
+            }
+          }),
+        ),
+      ],
+    ];
+  }
+
   void _showEditDialog(int originalIndex, ResultRow row) {
     final ipPortCtl = TextEditingController(text: row.ipPort);
     final sourceCtl = TextEditingController(text: row.source);
@@ -168,7 +243,17 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
 
     final rows = state.rows;
     final filteredRows = state.filteredRows;
-    final sortedRows = _sortRows(filteredRows);
+    // 来源归属依赖配置里的源名：源名可能含空格，靠前缀匹配才能整体命中。
+    final knownSources =
+        cfg == null ? const <String>[] : collectSubscriptionTasks(cfg).map((e) => e.$1).toList();
+    String srcOf(ResultRow r) => detectSource(r.source, knownSources);
+    final shownRows = filterByFacets(filteredRows,
+        countries: _fCountries, sources: _fSources, sourceOf: srcOf);
+    final sortedRows = _sortRows(shownRows);
+    // 芯片计数基于「搜索后、维度筛选前」的行集，点选时数字即预期结果。
+    final countryFacets = countFacets(filteredRows.map((r) => nodeCountry(r.node)));
+    final sourceFacets = countFacets(filteredRows.map(srcOf));
+    final filtering = _fCountries.isNotEmpty || _fSources.isNotEmpty;
 
     return LayoutBuilder(
       builder: (ctx, constraints) {
@@ -263,9 +348,9 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                             onChanged: (v) { setState(() {}); ref.read(resultProvider.notifier).setSearchQuery(v); },
                           ),
                         ),
-                      if (rows.isNotEmpty && !_rawView && filteredRows.length != rows.length)
-                        Text('${filteredRows.length}/${rows.length}',
-                            style: TextStyle(color: AppTheme.edgeOrange, fontSize: 12, fontWeight: FontWeight.w600)),
+                      if (rows.isNotEmpty && !_rawView && shownRows.length != rows.length)
+                        Text('${shownRows.length}/${rows.length}',
+                            style: const TextStyle(color: AppTheme.edgeOrange, fontSize: 12, fontWeight: FontWeight.w600)),
                       // 刷新
                       if (rows.isNotEmpty || _rawView)
                         IconButton.filledTonal(
@@ -354,6 +439,69 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                     ],
                   ),
                   const SizedBox(height: 16),
+
+                  // ── 筛选区：国家 / 来源芯片 + 按国家分组开关 ──
+                  if (rows.isNotEmpty &&
+                      !_rawView &&
+                      (countryFacets.length > 1 || sourceFacets.length > 1)) ...[
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Icon(Icons.filter_alt_outlined, size: 16, color: t.textDim),
+                        for (final e in countryFacets.entries)
+                          FilterChip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text('${e.key.isEmpty ? '未知' : e.key} ${e.value}',
+                                style: const TextStyle(fontSize: 12)),
+                            selected: _fCountries.contains(e.key),
+                            onSelected: (on) => setState(() {
+                              if (on) {
+                                _fCountries.add(e.key);
+                              } else {
+                                _fCountries.remove(e.key);
+                              }
+                            }),
+                          ),
+                        if (sourceFacets.length > 1)
+                          SizedBox(width: 6, height: 18, child: VerticalDivider(color: t.border, thickness: 1)),
+                        for (final e in sourceFacets.entries)
+                          FilterChip(
+                            visualDensity: VisualDensity.compact,
+                            label: Text('${e.key} ${e.value}', style: const TextStyle(fontSize: 12)),
+                            selected: _fSources.contains(e.key),
+                            tooltip: '来源名取自订阅配置的标签；含空格的源名按前缀整体匹配',
+                            onSelected: (on) => setState(() {
+                              if (on) {
+                                _fSources.add(e.key);
+                              } else {
+                                _fSources.remove(e.key);
+                              }
+                            }),
+                          ),
+                        if (!editMode)
+                          FilterChip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: Icon(Icons.segment, size: 16, color: t.textDim),
+                            label: const Text('按国家分组', style: TextStyle(fontSize: 12)),
+                            selected: _groupByCountry,
+                            onSelected: (on) => setState(() => _groupByCountry = on),
+                          ),
+                        if (filtering)
+                          ActionChip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: const Icon(Icons.clear, size: 16),
+                            label: const Text('清除筛选', style: TextStyle(fontSize: 12)),
+                            onPressed: () => setState(() {
+                              _fCountries.clear();
+                              _fSources.clear();
+                            }),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
 
                   // ── 空状态 ──
                   if (rows.isEmpty && !_rawView)
@@ -445,6 +593,8 @@ class _ResultsTabState extends ConsumerState<ResultsTab> with AutomaticKeepAlive
                     )
 
                   // ── 解析视图 ──
+                  else if (_groupByCountry && !editMode && sortedRows.isNotEmpty)
+                    ..._buildCountryGroups(context, rows, sortedRows)
                   else ...[
                     // 数据表格
                     ResultTable(

@@ -62,6 +62,27 @@ String nodeCountry(String node) {
   return afterHash.substring(0, sepIdx >= 0 ? sepIdx : afterHash.length).trim();
 }
 
+/// 从注释尾部（国家码之后的整段）判定来源名。
+///
+/// 行格式 `#CC 来源名 原始备注` 里两段只用空格分隔，而原始备注本身可能含空格，
+/// 所以先用已知源名（订阅配置里的标签）做前缀匹配，多个命中取最长；都不匹配时
+/// 退化为第一个空白 token —— 绝大多数源名不含空格，该兜底即为正确值。
+String detectSource(String tail, List<String> knownSources) {
+  final t = tail.trim();
+  if (t.isEmpty) return '';
+  final lower = t.toLowerCase();
+  var best = '';
+  for (final raw in knownSources) {
+    final s = raw.trim();
+    if (s.isEmpty) continue;
+    final ls = s.toLowerCase();
+    final hit = lower == ls || lower.startsWith('$ls ');
+    if (hit && s.length > best.length) best = s;
+  }
+  if (best.isNotEmpty) return best;
+  return t.split(RegExp(r'\s+')).first;
+}
+
 /// 用真实落地国家码替换节点名中的国家码。
 /// 仅替换在 [landingMap] 中有记录的 IP，其余节点原样返回。
 /// 例：`172.64.145.93:443#CN source` + landingMap[172.64.145.93]='SG'
