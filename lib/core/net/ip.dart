@@ -192,6 +192,21 @@ const _cfAirportMap = <String, String>{
   'NOU': 'NC',
 };
 
+/// 计算 `findProxy` 应返回的策略串（[applyProxyPolicy] 的可测内核）。
+///
+/// **必须显式钉死**：Dart 的 `HttpClient` 默认 `findProxy` 是
+/// `findProxyFromEnvironment`，会读 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量。
+/// 若只在传了 proxy 时设策略，那么「直连」调用在设了环境变量的机器上会悄悄
+/// 走代理 —— 落地检测与出口探测的结果就不再属于本机网络。
+String proxyPolicyFor(String? proxy) =>
+    (proxy != null && proxy.isNotEmpty) ? 'PROXY $proxy' : 'DIRECT';
+
+/// 按 [proxyPolicyFor] 设置 [client] 的代理策略。
+void applyProxyPolicy(HttpClient client, String? proxy) {
+  final policy = proxyPolicyFor(proxy);
+  client.findProxy = (uri) => policy;
+}
+
 /// 单个 IP 的 cdn-cgi/trace 落地检测结果。
 /// [airport] 为 Cloudflare 边缘机场码（如 HKG）；[country] 为两位国家码；
 /// [trace] 为原始 trace 文本（调试用，失败时为空）。
@@ -222,9 +237,7 @@ Future<CfLanding?> geolocateCfIp(
   final t = timeout ?? const Duration(milliseconds: 2500);
   final host = isIpv6(ip) ? '[$ip]' : ip;
   final client = HttpClient()..connectionTimeout = t;
-  if (proxy != null && proxy.isNotEmpty) {
-    client.findProxy = (uri) => 'PROXY $proxy';
-  }
+  applyProxyPolicy(client, proxy);
   try {
     for (final scheme in ['http', 'https']) {
       try {
@@ -276,9 +289,7 @@ Future<EgressInfo?> probeEgress({
   String? proxy,
 }) async {
   final client = HttpClient()..connectionTimeout = timeout;
-  if (proxy != null && proxy.isNotEmpty) {
-    client.findProxy = (uri) => 'PROXY $proxy';
-  }
+  applyProxyPolicy(client, proxy);
   try {
     final req =
         await client.getUrl(Uri.parse('https://www.cloudflare.com/cdn-cgi/trace'));
@@ -326,9 +337,7 @@ Future<Map<String, String>> geolocateCfIpBatch(
   }
 
   final client = HttpClient()..connectionTimeout = t;
-  if (proxy != null && proxy.isNotEmpty) {
-    client.findProxy = (uri) => 'PROXY $proxy';
-  }
+  applyProxyPolicy(client, proxy);
   try {
     await Future.wait(ips.map((ip) async {
       final cc = await traceOne(client, ip);
@@ -355,9 +364,7 @@ Future<Map<String, String>> geolocateIpCountryBatch(
   final t = timeout ?? const Duration(seconds: 8);
   final result = <String, String>{};
   final client = HttpClient()..connectionTimeout = t;
-  if (proxy != null && proxy.isNotEmpty) {
-    client.findProxy = (uri) => 'PROXY $proxy';
-  }
+  applyProxyPolicy(client, proxy);
   try {
     // ip-api.com 批量端点每次最多 100 个查询，超出需分块。
     for (var i = 0; i < ips.length; i += 100) {

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cfnb_app/core/net/ip.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -94,6 +96,24 @@ void main() {
 
     test('ip= 只在行首匹配，不误读其它字段', () {
       expect(parseEgressTrace('colo=LAX\nxip=9.9.9.9\n'), isNull);
+    });
+  });
+
+  group('proxyPolicyFor / applyProxyPolicy', () {
+    test('未传 proxy 时显式 DIRECT（不读 HTTP_PROXY 环境变量）', () {
+      expect(proxyPolicyFor(null), 'DIRECT');
+      expect(proxyPolicyFor(''), 'DIRECT');
+    });
+
+    test('传了 proxy 时走 PROXY host:port', () {
+      expect(proxyPolicyFor('127.0.0.1:7890'), 'PROXY 127.0.0.1:7890');
+    });
+
+    test('applyProxyPolicy 可赋值给 HttpClient（findProxy 只有 setter）', () {
+      final c = HttpClient();
+      addTearDown(() => c.close(force: true));
+      applyProxyPolicy(c, null);
+      applyProxyPolicy(c, '127.0.0.1:7890');
     });
   });
 }
