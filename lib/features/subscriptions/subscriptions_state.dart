@@ -22,7 +22,7 @@ import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
 
 /// 当前运行的动作类型。
-enum RunAction { subscription, landing }
+enum RunAction { subscription, landing, pipeline }
 
 /// 落地检测进度（供运行页进度条/日志轮询展示）。
 class LandingProgress {
@@ -48,6 +48,10 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
 
   /// 取消标志：调用 [cancel] 后置 true，任务在下一个检查点退出。
   bool _cancelRequested = false;
+
+  /// 正在跑 [runPipeline] 时为 true：单步动作此时不自管 running 状态，
+  /// 否则它们会互相把对方的 running 标志清掉。
+  bool _inPipeline = false;
 
   /// 自动更新定时器。
   Timer? _autoUpdateTimer;
@@ -121,9 +125,12 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
 
   /// 单独：订阅IP（转换订阅器 -> addressesapi.txt）。
   Future<void> runSubscription() async {
-    if (state.running) return;
-    _cancelRequested = false;
-    state = state.copyWith(running: true, currentAction: RunAction.subscription);
+    if (state.running && !_inPipeline) return;
+    // 流水线调用时由 runPipeline 统一管状态与取消标志。
+    if (_inPipeline == false) {
+      _cancelRequested = false;
+      state = state.copyWith(running: true, currentAction: RunAction.subscription);
+    }
     final cfg = await _cfg();
     final parser = await ref.read(nodeParserProvider.future);
     final logger = ref.read(subLoggerProvider);
@@ -172,7 +179,7 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       NotificationHelper.taskFailed(taskName: '订阅IP转换', error: e.toString());
       _notifyWebhook(cfg, title: '订阅IP转换失败', body: e.toString(), isError: true);
     } finally {
-      state = state.copyWith(running: false, clearAction: true);
+      if (!_inPipeline) state = state.copyWith(running: false, clearAction: true);
     }
   }
 
@@ -187,9 +194,11 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
   /// 因此检测开始时会先探测并打印本次连接的实际出口身份（见 [probeEgress]）。
   /// 返回 (成功数, 总数)。
   Future<(int, int)> runLandingCheck() async {
-    if (state.running) return (0, 0);
-    _cancelRequested = false;
-    state = state.copyWith(running: true, currentAction: RunAction.landing);
+    if (state.running && !_inPipeline) return (0, 0);
+    if (_inPipeline == false) {
+      _cancelRequested = false;
+      state = state.copyWith(running: true, currentAction: RunAction.landing);
+    }
     final cfg = await _cfg();
     final logger = ref.read(subLoggerProvider);
     try {
@@ -320,7 +329,75 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
       _notifyWebhook(cfg, title: '落地检测完成', body: '${landings.length}/${ipOfNode.length} 个 IP 已更新（$summary）', isError: false);
       return (landings.length, ipOfNode.length);
     } finally {
+      if (!_inPipeline) state = state.copyWith(running: false, clearAction: true);
+    }
+  }
+
+  /// 一键全流程：获取订阅 → 测落地（强制直连）→ 推送 GitHub。
+  ///
+  /// 两步的出口本就不同（抓取要出得去、测落地要本机真实出口），所以各自钉死：
+  /// 抓取走 dio 的系统代理策略，落地检测在 [applyProxyPolicy] 里显式 `DIRECT`，
+  /// 用户不必在两步之间开关代理。推送段仅在配了 GitHub 令牌且文件名可推送时执行；
+  /// 前两步任一没产出就中止，避免拿空结果去覆盖已有的好文件。
+  Future<void> runPipeline() async {
+    if (state.running) return;
+    _cancelRequested = false;
+    _inPipeline = true;
+    state = state.copyWith(running: true, currentAction: RunAction.pipeline);
+    final logger = ref.read(subLoggerProvider);
+    final cfg = await _cfg();
+    try {
+      logger.info('━━ 一键全流程：获取订阅 → 测落地 → 推送 ━━');
+      await runSubscription();
+      if (_cancelRequested) {
+        logger.info('「一键全流程」已取消');
+        return;
+      }
+      if (ref.read(resultProvider).rows.isEmpty) {
+        logger.error('「一键全流程」中止：订阅转换没有产出节点，落地检测与推送无意义。');
+        return;
+      }
+      final (ok, total) = await runLandingCheck();
+      if (_cancelRequested) {
+        logger.info('「一键全流程」已取消');
+        return;
+      }
+      if (total == 0 || ok == 0) {
+        logger.error('「一键全流程」中止：落地检测未识别到任何 IP（$ok/$total），不推送以免覆盖上一版结果。');
+        return;
+      }
+      await _pushLandingOutput(cfg, logger);
+    } finally {
+      _inPipeline = false;
       state = state.copyWith(running: false, clearAction: true);
+    }
+  }
+
+  /// 流水线的推送段。
+  Future<void> _pushLandingOutput(AppConfig cfg, AppLogger logger) async {
+    final file = cfg.landingOutputFile;
+    final pusher = _github(cfg);
+    if (pusher == null) {
+      logger.info('未配置 GitHub 令牌，跳过推送。');
+      return;
+    }
+    if (!GithubPush.isPushable(file)) {
+      logger.warning('输出文件 $file 不符合可推送命名（需 *_top.txt），跳过推送。');
+      return;
+    }
+    try {
+      final f = File(await _resolve(file));
+      if (!f.existsSync()) {
+        logger.error('推送失败：找不到文件 $file');
+        return;
+      }
+      await pusher.pushFile(file, await f.readAsString(), message: 'chore(auto): 更新优选结果');
+      logger.success('已推送 $file 到 ${cfg.githubRepo}@${cfg.githubBranch}');
+      _notifyWebhook(cfg,
+          title: '全流程完成', body: '$file 已推送到 ${cfg.githubRepo}', isError: false);
+    } catch (e) {
+      logger.error('推送失败：$e');
+      _notifyWebhook(cfg, title: '全流程推送失败', body: e.toString(), isError: true);
     }
   }
 

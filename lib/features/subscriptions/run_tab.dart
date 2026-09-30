@@ -46,6 +46,14 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
     }
   }
 
+  /// 一键全流程：获取订阅 → 测落地（直连）→ 推送 GitHub。
+  /// 两步的出口由代码各自钉死，用户不需要在中间开关代理。
+  Future<void> _runPipeline() async {
+    await ref.read(subProvider.notifier).runPipeline();
+    if (!mounted) return;
+    AppToast.show(context, '一键全流程结束，详见运行日志');
+  }
+
   Widget _buildAutoUpdateIndicator(AppConfig cfg) {
     if (!cfg.subAutoUpdateEnabled) return const SizedBox.shrink();
     return Padding(
@@ -68,6 +76,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
     final actionLabel = switch (run.currentAction) {
       RunAction.subscription => '正在获取订阅…',
       RunAction.landing => '正在检测落地…',
+      RunAction.pipeline => '正在执行一键全流程…',
       null => '任务进行中…',
     };
 
@@ -127,6 +136,15 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
                   child: Icon(Icons.public, size: 18),
                 ),
                 label: const Text('测落地'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _runPipeline,
+                icon: const Tooltip(
+                  message: '获取订阅（走系统代理）→ 测落地（强制直连）→ 推送 GitHub，'
+                      '两步出口各自钉死，中途不必开关代理',
+                  child: Icon(Icons.play_circle_outline, size: 18),
+                ),
+                label: const Text('一键全流程'),
               ),
               FilledButton.icon(
                 onPressed: _runSubscriptionAndNotify,
