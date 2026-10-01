@@ -72,6 +72,14 @@ void main() {
       final c = AppConfig.fromJson({'LANDING_PROXY': '127.0.0.1:7890'});
       expect(c.toJson().containsKey('LANDING_PROXY'), isFalse);
     });
+
+    test('probeEgresses 默认值与序列化往返', () {
+      expect(const AppConfig().probeEgresses, ['本机直连|']);
+      expect(AppConfig.fromJson({}).probeEgresses, ['本机直连|']);
+      const c = AppConfig(probeEgresses: ['本机直连|', '节点A|127.0.0.1:7890']);
+      expect(AppConfig.fromJson(c.toJson()).probeEgresses,
+          ['本机直连|', '节点A|127.0.0.1:7890']);
+    });
   });
 
   group('AppConfig.fromJson parsing', () {

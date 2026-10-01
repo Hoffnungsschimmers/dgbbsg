@@ -12,6 +12,7 @@ import '../../app/providers.dart';
 import '../../core/logging/app_logger.dart';
 import '../../core/config/app_config.dart';
 import '../../core/github/github_push.dart';
+import '../../core/net/egress_compare.dart';
 import '../../core/net/endpoint.dart';
 import '../../core/net/ip.dart';
 import '../../core/net/landing_history.dart';
@@ -22,7 +23,7 @@ import '../../core/subscription/subscription_converter.dart';
 import '../results/result_state.dart';
 
 /// 当前运行的动作类型。
-enum RunAction { subscription, landing, pipeline }
+enum RunAction { subscription, landing, pipeline, egressCompare }
 
 /// 落地检测进度（供运行页进度条/日志轮询展示）。
 class LandingProgress {
@@ -401,6 +402,97 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     }
   }
 
+  /// 多出口对照探测：同一批 IP 依次经各配置出口做 cdn-cgi/trace，
+  /// 产出对照 CSV 并把结果并入落地历史，用来回答「这个 anycast IP 在不同网络下落到哪」。
+  ///
+  /// 串行（每个出口内部逐 IP），出口之间也串行 —— 与落地检测同样的限流考虑。
+  Future<String?> runEgressComparison() async {
+    if (state.running) return null;
+    _cancelRequested = false;
+    state = state.copyWith(running: true, currentAction: RunAction.egressCompare);
+    final cfg = await _cfg();
+    final logger = ref.read(subLoggerProvider);
+    try {
+      final profiles = parseEgressProfiles(cfg.probeEgresses);
+      if (profiles.isEmpty) {
+        logger.warning('未配置任何探测出口（配置页「探测出口」），本次对照未执行。');
+        return null;
+      }
+      final resultState = ref.read(resultProvider);
+      final readPath = (resultState.currentFile != null &&
+              resultState.currentFile!.isNotEmpty &&
+              File(resultState.currentFile!).existsSync())
+          ? resultState.currentFile!
+          : await _resolve(cfg.landingOutputFile);
+      final ips = <String>{};
+      for (final n in await _readNodes(readPath, logger: logger)) {
+        final ep = parseEndpoint(n);
+        if (ep != null) ips.add(ep.$1);
+      }
+      if (ips.isEmpty) {
+        logger.warning('没有可对照的 IP（$readPath），请先运行「订阅IP」。');
+        return null;
+      }
+      logger.info('━━ 多出口对照：${profiles.length} 个出口 × ${ips.length} 个 IP（串行）━━');
+
+      final rows = <EgressObservation>[];
+      final dir = await getApplicationDocumentsDirectory();
+      final historyFile = File('${dir.path}/landing_history.json');
+      final now = DateTime.now().toString().substring(0, 19);
+      for (final p in profiles) {
+        if (_cancelRequested) {
+          logger.info('「多出口对照」已取消');
+          break;
+        }
+        final exit = await probeEgress(proxy: p.proxy);
+        logger.info('▶ 出口「${p.name}」${p.proxy.isEmpty ? '（直连）' : '（经 ${p.proxy}）'}'
+            '：公网侧 ${exit?.ip ?? '未知'}，Cloudflare 判给 ${exit?.colo ?? '?'}');
+        final perIp = <String, ({String colo, String cc})>{};
+        var done = 0;
+        for (final ip in ips) {
+          if (_cancelRequested) break;
+          final landing = await geolocateCfIp(ip,
+                  timeout: const Duration(milliseconds: 4000), proxy: p.proxy.isEmpty ? null : p.proxy)
+              .timeout(const Duration(seconds: 12), onTimeout: () => null);
+          done++;
+          final colo = landing?.airport ?? '';
+          final cc = landing?.country ?? '';
+          perIp[ip] = (colo: colo, cc: cc);
+          rows.add((
+            ip: ip,
+            egress: p.name,
+            colo: colo,
+            cc: cc,
+            exitIp: exit?.ip ?? '',
+          ));
+          if (done % 100 == 0) logger.info('  [$p.name] 已探测 $done/${ips.length}');
+        }
+        await recordLandingRound(historyFile, at: now, results: perIp, egressIp: exit?.ip ?? '');
+        logger.success('  「${p.name}」完成：识别 ${perIp.values.where((v) => v.cc.isNotEmpty).length}/${ips.length}');
+      }
+
+      if (rows.isEmpty) return null;
+      final out = File('${dir.path}/landing_compare_${landingStampFor(now)}.csv');
+      await out.writeAsString(renderComparisonCsv(rows));
+      ref.invalidate(landingHistoryProvider);
+
+      final pivot = pivotByIp(rows);
+      final divergent = countDivergentIps(pivot);
+      logger.success('多出口对照完成：${rows.length} 条观测 → ${out.path}（$divergent 个 IP 在不同出口下落地不同）');
+      _notifyWebhook(cfg,
+          title: '多出口对照完成',
+          body: '${profiles.length} 个出口 × ${ips.length} 个 IP，'
+              '$divergent 个 IP 落地不一致 → ${out.uri.pathSegments.last}',
+          isError: false);
+      return out.path;
+    } catch (e) {
+      logger.error(e.toString());
+      return null;
+    } finally {
+      state = state.copyWith(running: false, clearAction: true);
+    }
+  }
+
   /// 订阅源健康度：累计每个来源的连续失败轮数，刚好达到阈值时告警一次。
   /// 统计失败绝不影响转换主流程，因此整段吞异常。
   Future<void> _trackSourceHealth(
@@ -501,11 +593,8 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
     if (landings.isEmpty) return;
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final f = File('${dir.path}/landing_history.json');
-      final history =
-          f.existsSync() ? parseLandingHistory(await f.readAsString()) : <String, List<LandingObservation>>{};
-      final next = appendLandingRound(
-        history,
+      await recordLandingRound(
+        File('${dir.path}/landing_history.json'),
         at: at,
         results: {
           for (final e in landings.entries)
@@ -513,7 +602,6 @@ class SubscriptionsNotifier extends StateNotifier<SubscriptionsState> {
         },
         egressIp: egress?.ip ?? '',
       );
-      await f.writeAsString(encodeLandingHistory(next));
     } catch (_) {
       // 忽略历史写入失败
     }

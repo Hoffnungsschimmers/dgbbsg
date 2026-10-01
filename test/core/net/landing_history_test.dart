@@ -112,6 +112,26 @@ void main() {
           isNull);
     });
 
+    test('recordLandingRound 先读后写，不覆盖既有历史', () async {
+      final dir = Directory.systemTemp.createTempSync('cfnb_rec');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final f = File('${dir.path}${Platform.pathSeparator}landing_history.json');
+
+      await recordLandingRound(f,
+          at: '2026-09-29 20:00:00',
+          results: {'1.1.1.1': (colo: 'HKG', cc: 'HK')},
+          egressIp: '9.9.9.9');
+      await recordLandingRound(f,
+          at: '2026-09-29 21:00:00',
+          results: {'2.2.2.2': (colo: 'LAX', cc: 'US')},
+          egressIp: '8.8.8.8');
+
+      final h = parseLandingHistory(await f.readAsString());
+      expect(h.keys.toSet(), {'1.1.1.1', '2.2.2.2'});
+      expect(h['1.1.1.1']!.single.egressIp, '9.9.9.9');
+      expect(h['2.2.2.2']!.single.colo, 'LAX');
+    });
+
     test('prune 只留最近 landingSnapshotKeep 份', () {
       final dir = Directory.systemTemp.createTempSync('cfnb_lh_prune');
       addTearDown(() => dir.deleteSync(recursive: true));

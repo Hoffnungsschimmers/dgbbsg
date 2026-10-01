@@ -24,6 +24,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   final _countryCtl = TextEditingController();
   final _countryFocus = FocusNode();
   final _landingOutCtl = TextEditingController();
+  final _probeEgressCtl = TextEditingController();
+  final _probeEgressFocus = FocusNode();
   final _landingOutFocus = FocusNode();
   final _tokenCtl = TextEditingController();
   final _tokenFocus = FocusNode();
@@ -77,6 +79,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _countryCtl.dispose();
     _countryFocus.dispose();
     _landingOutCtl.dispose();
+    _probeEgressCtl.dispose();
+    _probeEgressFocus.dispose();
     _landingOutFocus.dispose();
     _tokenCtl.dispose();
     _tokenFocus.dispose();
@@ -124,6 +128,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _syncIf(_wdIntervalCtl, _wdIntervalFocus, cfg.webdavAutoSyncIntervalMin.toString());
     _syncIf(_webhookUrlCtl, _webhookUrlFocus, cfg.webhookUrl);
     _syncIf(_landingOutCtl, _landingOutFocus, cfg.landingOutputFile);
+    _syncIf(_probeEgressCtl, _probeEgressFocus, cfg.probeEgresses.join('\n'));
     _isSyncing = false;
   }
 
@@ -208,6 +213,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                     _buildNodeParamsSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildFetchSection(context, cfg),
+                    const SizedBox(height: 12),
+                    _buildEgressSection(context, cfg),
                     const SizedBox(height: 12),
                     _buildWebhookSection(context, cfg),
                     const SizedBox(height: 12),
@@ -1086,6 +1093,51 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   }
 
   // ═══════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════
+  // ③′ 探测出口（多出口对照用）
+  // ═══════════════════════════════════════════════════════
+
+  /// 多出口对照探测的出口清单：每行一条 `名称|host:port`，`|` 后留空即直连。
+  Widget _buildEgressSection(BuildContext context, AppConfig cfg) {
+    final t = AppThemeExt.of(context);
+    return SectionCollapsible(
+      title: '探测出口（多出口对照）',
+      icon: Icons.compare_arrows,
+      initiallyExpanded: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _probeEgressCtl,
+            focusNode: _probeEgressFocus,
+            minLines: 2,
+            maxLines: 5,
+            style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
+            decoration: InputDecoration(
+              labelText: '出口清单（每行一条：名称|host:port，留空 host 即直连）',
+              labelStyle: TextStyle(fontSize: 13, color: t.textDim),
+              hintText: '本机直连|\n节点A|127.0.0.1:7890',
+              hintStyle: TextStyle(fontSize: 12, color: t.textDim),
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(borderRadius: t.radius),
+            ),
+            onChanged: (v) => _save(cfg.copyWith(
+              probeEgresses:
+                  v.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).toList(),
+            )),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '运行页「多出口对照」会让同一批 IP 依次经这些出口做 cdn-cgi/trace，'
+            '产出 CSV 对照表并写入落地历史。落地检测本身始终直连，不受此处影响。',
+            style: TextStyle(fontSize: 12, color: t.textDim),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ④ GitHub 推送
   // ═══════════════════════════════════════════════════════
 

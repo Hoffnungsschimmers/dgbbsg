@@ -105,6 +105,22 @@ LandingHistory parseLandingHistory(String raw) {
 /// `2026-09-29 20:55:01` → `2026-09-29-20-55-01`，用于文件名且天然按时间排序。
 String landingStampFor(String at) => at.replaceAll(RegExp(r'[: ]'), '-');
 
+/// 把一轮观测并入历史文件：**先读后追加再写**，因此不会覆盖既有历史。
+///
+/// 落地检测与多出口对照共用此入口 —— 「从空表开始整体写回」会抹掉积累的时间线，
+/// 这个不变式集中在一处才好测、才好守。
+Future<void> recordLandingRound(
+  File historyFile, {
+  required String at,
+  required Map<String, ({String colo, String cc})> results,
+  String egressIp = '',
+}) async {
+  final existing =
+      historyFile.existsSync() ? parseLandingHistory(await historyFile.readAsString()) : <String, List<LandingObservation>>{};
+  final next = appendLandingRound(existing, at: at, results: results, egressIp: egressIp);
+  await historyFile.writeAsString(encodeLandingHistory(next));
+}
+
 /// 写回前把当前结果文件复制成带时间戳的快照，防止「一次错误的落地覆盖毁掉好结果」。
 /// 返回快照文件；[current] 不存在或复制失败时返回 null。
 File? snapshotLandingOutput(File current, Directory dir, String at) {

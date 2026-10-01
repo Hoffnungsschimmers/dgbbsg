@@ -46,6 +46,17 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
     }
   }
 
+  /// 多出口对照探测：结果 CSV 路径（未产出时为 null）。
+  Future<void> _runEgressCompare() async {
+    final path = await ref.read(subProvider.notifier).runEgressComparison();
+    if (!mounted) return;
+    if (path == null) {
+      AppToast.show(context, '多出口对照未产出结果，详见运行日志', success: false);
+    } else {
+      AppToast.show(context, '对照表已生成：$path');
+    }
+  }
+
   /// 一键全流程：获取订阅 → 测落地（直连）→ 推送 GitHub。
   /// 两步的出口由代码各自钉死，用户不需要在中间开关代理。
   Future<void> _runPipeline() async {
@@ -77,6 +88,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
       RunAction.subscription => '正在获取订阅…',
       RunAction.landing => '正在检测落地…',
       RunAction.pipeline => '正在执行一键全流程…',
+      RunAction.egressCompare => '正在做多出口对照…',
       null => '任务进行中…',
     };
 
@@ -145,6 +157,15 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
                   child: Icon(Icons.play_circle_outline, size: 18),
                 ),
                 label: const Text('一键全流程'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _runEgressCompare,
+                icon: const Tooltip(
+                  message: '同一批 IP 依次经配置页「探测出口」里的各个出口做 cdn-cgi/trace，'
+                      '产出 CSV 对照表并写入落地历史，用来对比 anycast IP 在不同网络下的落地差异',
+                  child: Icon(Icons.compare_arrows, size: 18),
+                ),
+                label: const Text('多出口对照'),
               ),
               FilledButton.icon(
                 onPressed: _runSubscriptionAndNotify,

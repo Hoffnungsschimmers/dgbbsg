@@ -22,6 +22,7 @@ class AppConfig {
 
   // ============ 落地检测与输出 ============
   final String landingOutputFile; // 最终结果文件（落地检测写回 + 推送目标，默认 addressesapi_top.txt）
+  final List<String> probeEgresses; // 多出口对照探测的出口清单：`名称|host:port`，host 为空即直连
   final bool subInsecure; // 跳过订阅抓取时的 TLS 证书校验（默认 false，安全默认）
 
   // ============ GitHub 推送（独立的优选结果仓） ============
@@ -68,6 +69,7 @@ class AppConfig {
     this.subFetchMaxRetries = 2,
     this.subFetchRetryDelay = 2.0,
     this.landingOutputFile = 'addressesapi_top.txt',
+    this.probeEgresses = const ['本机直连|'],
     this.subInsecure = false,
     this.githubToken = '',
     this.githubRepo = 'Hoffnungsschimmers/mnscn',
@@ -128,6 +130,7 @@ class AppConfig {
       subInsecure: pick('SUB_INSECURE', false),
       // 新键优先；旧键 SUB_LATENCY_OUTPUT_FILE 兜底（延迟优选已移除，兼容历史配置）。
       landingOutputFile: pick('LANDING_OUTPUT_FILE', pick('SUB_LATENCY_OUTPUT_FILE', 'addressesapi_top.txt')),
+      probeEgresses: pickStrList('PROBE_EGRESSES', const ['本机直连|']),
       githubToken: pick('GITHUB_TOKEN', ''),
       githubRepo: pick('GITHUB_REPO', 'Hoffnungsschimmers/mnscn'),
       githubBranch: pick('GITHUB_BRANCH', 'main'),
@@ -164,6 +167,7 @@ class AppConfig {
         'SUB_FETCH_RETRY_DELAY': subFetchRetryDelay,
         'SUB_INSECURE': subInsecure,
         'LANDING_OUTPUT_FILE': landingOutputFile,
+        'PROBE_EGRESSES': probeEgresses,
         'GITHUB_REPO': githubRepo,
         'GITHUB_BRANCH': githubBranch,
         'SUB_AUTO_UPDATE_ENABLED': subAutoUpdateEnabled,
@@ -195,6 +199,7 @@ class AppConfig {
     int? subFetchMaxRetries,
     double? subFetchRetryDelay,
     String? landingOutputFile,
+    List<String>? probeEgresses,
     bool? subInsecure,
     String? githubToken,
     String? githubRepo,
@@ -229,6 +234,7 @@ class AppConfig {
       subFetchMaxRetries: subFetchMaxRetries ?? this.subFetchMaxRetries,
       subFetchRetryDelay: subFetchRetryDelay ?? this.subFetchRetryDelay,
       landingOutputFile: landingOutputFile ?? this.landingOutputFile,
+      probeEgresses: probeEgresses ?? this.probeEgresses,
       subInsecure: subInsecure ?? this.subInsecure,
       githubToken: githubToken ?? this.githubToken,
       githubRepo: githubRepo ?? this.githubRepo,
