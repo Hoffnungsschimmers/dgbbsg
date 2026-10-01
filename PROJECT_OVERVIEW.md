@@ -245,6 +245,7 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 - **「不设 proxy」不等于直连**：Dart `HttpClient` 的默认 `findProxy` 是 `findProxyFromEnvironment`，会读 `HTTP_PROXY` / `HTTPS_PROXY` 环境变量。任何需要真直连的路径（落地检测、出口探测、归属地兜底）必须显式钉 `DIRECT`，统一走 `core/net/ip.dart` 的 `applyProxyPolicy` / `proxyPolicyFor`。GitHub API 推送本来就是这么做的。
 - **测 notifier 编排要种 prefs，只 override `configProvider` 没用**：`_cfg()` 走 `readLatestConfig` → 优先 `latestConfigProvider`，否则 `repo.current`。空 SharedPreferences 会回落到**默认配置（`both` + 内置 10 个订阅器）**，于是测试真的去发请求（测试绑定一律返回 400 → 触发退避重试 → 用例超时 30s）。正解是 `SharedPreferences.setMockInitialValues({'flutter.app_config_json': ...})` 把目标配置种进去，见 `pipeline_test.dart`。
 - **`testWidgets` 里不要直接 await 含异步依赖的链**：fake async 区里定时器要靠 `pump` 才走；纯逻辑编排用例用普通 `test()` + `ProviderContainer` 更省事（也避开 widget 绑定对 HttpClient 的拦截语义）。
+- **仓库正文是 LF，脚本改文件必须用二进制模式**：`core.autocrlf=false` 且没有 `.gitattributes`，git 不做行尾转换。用 Python 文本模式 `open(path,'w')` 重写会把文件整份换成 CRLF，一次提交能产生 4047 增 / 4047 删的整文件 diff，把真实改动全埋掉。判据：`git diff --ignore-cr-at-eol --stat` 输出为空 → 纯行尾噪音。改文件优先用编辑工具，必须脚本化时走 `open(path,'wb')`。
 - **沟通语言**：简体中文，先结论后细节。
 - 提交/改代码前先跑 `flutter test` + `flutter analyze`（全仓零 error/warning）验证。
 
