@@ -19,6 +19,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../helpers/temp_dir.dart';
 
 class _Paths extends PathProviderPlatform {
   final String dir;
@@ -56,7 +57,7 @@ void main() {
   });
   tearDown(() async {
     PathProviderPlatform.instance = paths;
-    await dir.delete(recursive: true);
+    await removeTempDir(dir);
   });
 
   test('推送门槛区分实测与估计，并识别数量骤减', () {

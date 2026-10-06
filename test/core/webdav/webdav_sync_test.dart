@@ -7,6 +7,7 @@ import 'package:cfnb_app/core/webdav/webdav_client.dart';
 import 'package:cfnb_app/core/webdav/webdav_sync.dart';
 import 'package:dio/dio.dart' as dio_pkg;
 import 'package:flutter_test/flutter_test.dart';
+import '../../helpers/temp_dir.dart';
 
 /// 内存 WebDAV 适配器：PUT 存字节、GET 返回或 404，记录请求与认证头。
 class _MemAdapter implements dio_pkg.HttpClientAdapter {
@@ -146,7 +147,7 @@ void main() {
       final adapter = _MemAdapter();
       final client = _client(adapter);
       final dir = await Directory.systemTemp.createTemp('webdav_backup_');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
       File('${dir.path}/a.txt').writeAsStringSync('AAA');
 
       final uploaded = await WebDavSync.backupResults(
@@ -179,7 +180,7 @@ void main() {
       final adapter = _MemAdapter();
       final client = _client(adapter);
       final dir = await Directory.systemTemp.createTemp('cfnb_absolute_sync_');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
       final actual = File('${dir.path}/custom/result.txt');
       await actual.parent.create(recursive: true);
       await actual.writeAsString('actual');
@@ -200,7 +201,7 @@ void main() {
       adapter.files[_key('a.txt.json')] = utf8.encode('{"a":1}');
       final client = _client(adapter);
       final dir = await Directory.systemTemp.createTemp('webdav_restore_');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
 
       final restored = await WebDavSync.restoreResults(
         client,

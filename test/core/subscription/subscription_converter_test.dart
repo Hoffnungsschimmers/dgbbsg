@@ -8,6 +8,8 @@ import 'package:cfnb_app/core/subscription/subscription_converter.dart';
 import 'package:cfnb_app/features/results/result_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../helpers/temp_dir.dart';
+
 void main() {
   final parser = NodeParser(cnToCode: {'美国': 'US'}, alpha3ToAlpha2: {});
 
@@ -285,7 +287,7 @@ void main() {
         alpha3ToAlpha2: {},
       );
       final dir = await Directory.systemTemp.createTemp('cfnb_remark');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
       final file = '${dir.path}${Platform.pathSeparator}addressesapi.txt';
 
       Future<String> fetch(String url, {String label = ''}) async => [
@@ -324,7 +326,7 @@ void main() {
 
     test('旁文件可携带出口身份等附加元数据', () async {
       final dir = await Directory.systemTemp.createTemp('cfnb_meta');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
       final file = '${dir.path}${Platform.pathSeparator}addressesapi_top.txt';
 
       await writeSubOutput(['1.1.1.1:443#HK 麒麟 香港 01'], file, extraMeta: {

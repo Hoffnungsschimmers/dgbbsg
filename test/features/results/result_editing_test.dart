@@ -5,6 +5,7 @@ import 'package:cfnb_app/features/results/result_state.dart';
 import 'package:cfnb_app/core/storage/result_files.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import '../../helpers/temp_dir.dart';
 
 class _Paths extends PathProviderPlatform {
   _Paths(this.path);
@@ -34,7 +35,7 @@ void main() {
   tearDown(() async {
     notifier.dispose();
     PathProviderPlatform.instance = original;
-    await dir.delete(recursive: true);
+    await removeTempDir(dir);
   });
 
   Future<File> seed(String name, String text) async {

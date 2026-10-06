@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../helpers/temp_dir.dart';
 
 class _Paths extends PathProviderPlatform {
   final String dir;
@@ -147,7 +148,7 @@ void main() {
   });
   tearDown(() async {
     PathProviderPlatform.instance = oldPaths;
-    await dir.delete(recursive: true);
+    await removeTempDir(dir);
   });
 
   test('失败时保留旧结果，不继续检测或推送', () async {
