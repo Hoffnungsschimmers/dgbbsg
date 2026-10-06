@@ -1,13 +1,18 @@
 # CFNB（CF优选工具）项目总览
 
-> 本文档由代码全面梳理生成（2026-09-20），描述项目的功能、架构、数据流、构建方式与当前工作区状态。
-> 配套文档：`HANDOVER.md`（2026-09-17 的本地交接笔记，**未入库**，其延迟优选相关内容已过时）、`PROJECT_CONTEXT.md`（**已过时，勿信**）。
-> 2026-09-20 更新：按用户确认的产品范围，**延迟优选（TCP 测速排名）已彻底移除**，流程收敛为「获取 → 落地检测 → 推送」（详见 §10）。
-> 2026-09-29 更新：① 输出行注释改为 `#国家码 来源名 原始节点备注`（§5.1）；② 修复配置页输入框不回填（§11）；③ CI 的 build_runner 步骤会让 analyze job 必然失败，已删（§12）；④ Windows 构建需 MSVC，本机曾缺工具链（§12）。
+> 本文是项目的**权威技术总览**：功能、架构、数据流、配置、测试语义、构建环境与硬教训。
+> 使用说明见 [`README.md`](README.md)，逐版本变更见 [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md)，
+> 逐轮验收记录见 `docs/IMPLEMENTATION_*.md`，后续规划见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
+> 历史沿革与旧工作区快照已移至 [`docs/archive/PROJECT_HISTORY.md`](docs/archive/PROJECT_HISTORY.md)。
+>
+> **当前状态（2026-10-06 实测）**：版本 `1.1.0+2`；`flutter test` **336/336 全绿**（37 个测试文件）；
+> `flutter analyze --no-fatal-infos` **0 error / 0 warning / 204 info**，退出码 0。
+> 产品范围为三步：**获取订阅 → 落地检测 → 推送**（延迟优选 TCP 测速已于 2026-09-20 按用户决定彻底移除）。
+> 落地检测**只走直连**并记录出口身份；结果页的分类芯片与分组视图已移除，保留搜索、排序、行编辑与整段原始内容编辑。
 
 ## 1. 项目简介
 
-**CFNB** 是一个 Flutter 跨端桌面/移动应用（包名 `cfnb_app`，版本 `1.0.0+1`），核心功能是 **Cloudflare IP 优选**：
+**CFNB** 是一个 Flutter 跨端桌面/移动应用（包名 `cfnb_app`，版本 `1.1.0+2`），核心功能是 **Cloudflare IP 优选**：
 
 ```
 订阅源抓取 → 解析节点 → 去重 → 输出 addressesapi.txt
@@ -35,13 +40,15 @@
 
 ```powershell
 flutter pub get
-flutter analyze          # 质量基线：全仓 0 error 0 warning（177 条 info 属正常，CI 用 --no-fatal-infos 容忍）
-flutter test             # 基线：265/265 通过（已达成）
+flutter analyze --no-fatal-infos   # 基线：0 error / 0 warning（204 条 info 属正常，CI 同样容忍 info）
+flutter test                       # 基线：336/336 通过（2026-10-06 实测）
 flutter build windows --release
 # 产物：build/windows/x64/runner/Release/cfnb_app.exe
 # 注意：Windows 构建需要 MSVC 工具链（Visual Studio 2022 的「C++ 桌面负载」+ ATL 组件），
-#       详见 §12；Dart 代码实际编译进 data/app.so，只改 Dart 时 exe 时间戳不会变。
+#       详见 §11；Dart 代码实际编译进 data/app.so，只改 Dart 时 exe 时间戳不会变。
 
+# 便携 zip + 校验文件（版本号取自 pubspec，带时间戳）：
+.\scripts\package-windows.ps1
 # 打包 MSIX 安装器 + 便携 zip（需管理员 PowerShell）：
 .\scripts\build_windows.ps1
 
@@ -67,7 +74,7 @@ lib/
 │   ├── breakpoints.dart      响应式断点（compact<600 / medium<840 / expanded≥840）
 │   ├── motion.dart           动画时长/曲线常量
 │   ├── shortcuts.dart        快捷键定义（切 Tab/刷新/编辑模式/运行/取消）
-│   ├── system_tray.dart      Windows 托盘菜单（显示窗口/订阅IP/延迟优选/退出）
+│   ├── system_tray.dart      Windows 托盘菜单（显示窗口 / 运行订阅IP / 退出）
 │   ├── notification_helper.dart  本地系统通知封装
 │   └── platform.dart         平台判断
 ├── core/                     纯逻辑层（不依赖 UI，均被测试覆盖）
@@ -95,46 +102,68 @@ lib/
 │   │   │                            分歧计数与对照 CSV 渲染（纯逻辑）
 │   │   ├── ip.dart                  isIp/isIpv4/isIpv6、bracketIpv6Host（IPv6 规范化）、
 │   │   │                            isCloudflareIp、geolocateCfIp（落地检测）、
-│   │   │                            probeEgress/parseEgressTrace（本次连接出口身份）
+│   │   │                            probeEgress/parseEgressTrace（本次连接出口身份）、
+│   │   │                            applyProxyPolicy/proxyPolicyFor（显式钉 DIRECT 的唯一入口）
+│   │   ├── geo_cache.dart           GeoIP 归属地缓存（`GeoCache`，`geoCacheLifetime = 7 天`）：
+│   │   │                            带时间戳读写，过期项与旧无时间戳项一律重新查询
+│   │   ├── push_quality.dart        推送质量门槛纯函数 `pushQualityIssue`：最少节点数、
+│   │   │                            POP 实测独立 IP 占比、相对基线的保留占比 → 返回拦截原因
+│   │   ├── task_cancel.dart         `TaskCancel` 取消令牌：check/register/delay(可中断退避)/
+│   │   │                            cancel + `TaskCancelled` 异常；网络请求关闭与重试等待共用
 │   │   ├── landing_history.dart     落地时间线：观测模型、appendLandingRound（去重+
 │   │   │                            每 IP 限 8 条）、写回前快照与保留 20 份的裁剪
 │   │   ├── http_fetcher.dart        fetchHttpWithRetry（订阅抓取 + 重试 + 错误分类）
 │   │   ├── proxy.dart               readSystemProxy（系统代理读取）
 │   │   └── retry.dart               通用重试
+│   ├── storage/
+│   │   ├── safe_file.dart           safeWriteBytes/safeWriteText（临时文件→flush→替换，
+│   │   │                            异常保留 .previous）+ recoverSafeFile（中断后恢复）
+│   │   └── result_files.dart        writeResultBundle/readResultMeta：结果 txt 与 `.json` 旁文件
+│   │                                用内容 SHA-256 关联，按路径串行化写入，写回前落快照
 │   ├── github/github_push.dart      GitHub Contents API 推送/拉取（pushFile/pullFile/
 │   │                                pushMultiple/fetchCommitTime；仅 *_top.txt 可推送）
 │   ├── webdav/                      webdav_client.dart（WebDAV 基础客户端）、
 │   │                                webdav_sync.dart（配置+结果文件备份/恢复，自动同步）
-│   ├── export/result_exporter.dart  结果导出 5 种格式：CSV / Clash YAML / v2ray JSON /
-│   │                                sing-box JSON / 纯文本
+│   ├── export/result_exporter.dart  结果导出 5 种格式：CSV / TXT（地址数据）+
+│   │                                Clash YAML / v2ray JSON / sing-box JSON（**配置模板**，
+│   │                                缺真实协议与认证参数，导出前有说明）
 │   ├── notification/webhook_sender.dart  Telegram / Discord Webhook 通知
-│   └── logging/app_logger.dart      内存日志（运行页日志面板数据源）
+│   └── logging/app_logger.dart      内存日志环形缓冲（运行页面板数据源）+ 落盘：
+│                                    应用目录 `logs/` 按天滚动、保留 7 天、单文件超 1 MB
+│                                    轮换一次；入内存/落盘/导出前统一脱敏，落盘失败不影响任务
 ├── features/
 │   ├── subscriptions/
 │   │   ├── config_tab.dart          配置页：订阅输入（node/url/both 模式）、抓取参数、
-│   │   │                            落地检测（代理）、定时更新、GitHub、Webhook、WebDAV、外观
-│   │   ├── run_tab.dart             运行页：获取订阅 / 测落地（直连+出口身份）/ 一键全流程 / 多出口对照
-│   │   │                            / 一键全流程（获取 → 测落地 → 推送）
-│   │   │                            按钮 + 实时日志
-│   │   └── subscriptions_state.dart SubscriptionsNotifier：获取订阅与落地检测两动作的
-│   │                                编排与取消、自动更新定时器（5–480 分钟）、Webhook 触发
-│   ├── results/                     结果页：表格展示、搜索、国家筛选芯片、
-│   │   │                            按国家分组、编辑、IP 数量统计、
+│   │   │                            落地检测与多出口探测、定时更新三模式、GitHub（含推送门槛）、
+│   │   │                            Webhook、WebDAV、外观
+│   │   ├── run_tab.dart             运行页：获取订阅 / 测落地（直连 + 出口身份）/ 多出口对照 /
+│   │   │                            一键全流程（获取 → 测落地 → 推送）按钮，阶段进度与处理数量、
+│   │   │                            运行摘要、停止按钮 + 实时日志（可导出）
+│   │   └── subscriptions_state.dart SubscriptionsNotifier：RunAction（fetch/landing/pipeline/
+│   │                                egressCompare）编排、固定本轮配置、TaskCancel 取消、
+│   │                                并发任务互斥、自动更新定时器（5–480 分钟，三种模式）、
+│   │                                Webhook 触发、源健康度告警
+│   ├── results/                     结果页：表格展示（含证据来源）、搜索、排序、拖拽调序、
 │   │   ├── results_tab.dart / results_table.dart / result_state.dart
-│   │   │                            导出、推送 GitHub、地址选择器
+│   │   │                            行编辑与整段原始内容编辑、撤销/重做（30 步）、未保存守卫、
+│   │   │                            IP 数量统计、导出、推送门槛拦截、落地历史面板、
+│   │   │                            快照恢复、地址选择器
 │   ├── github_sync/                 同步页：远端 *_top.txt 拉取比对、双向推送、节点增删改
 │   ├── webdav/webdav_sync_panel.dart    WebDAV 同步底部面板（AppBar 云图标入口）
 │   ├── onboarding/onboarding_wizard.dart  首启 4 步引导（欢迎/输入模式/GitHub/完成）
 │   └── widgets/                     通用组件：cards/common/pills/sliders/toast/log_view/
 │                                    count_up_text/section_collapsible
-└── (数据文件) addressesapi.txt / addressesapi_top.txt  转换与优选输出（工作区根目录）
+└── (数据文件) 结果输出不入库：运行时按 `resolveOutputPath` 写在文档目录
+                                （`%USERPROFILE%\Documents\addressesapi.txt` /
+                                 `..._top.txt` + 同名 `.json` 旁文件 + 同级 `history/` 快照）
 
-test/                        35 个测试文件、317 个用例（app/core/features 分层）
-docs/superpowers/plans/      历史开发计划文档（2026-07 ~ 2026-08）
-history/                     结果文件时间戳备份（2026-07-17 的 16 份 ip.txt 快照）
-scripts/build_windows.ps1    Windows 发布脚本（MSIX + 便携 zip）
+test/                        37 个测试文件、336 个用例（app/core/features 分层）
+docs/                        RELEASE_NOTES / ROADMAP / IMPLEMENTATION_*（逐轮验收）/
+                             archive（历史沿革）/ superpowers（2026-07~08 历史计划与 spec）
+scripts/build_windows.ps1    MSIX + 便携 zip 发布脚本（需管理员 PowerShell）
+scripts/package-windows.ps1  便携 zip + SHA-256 校验（版本号取自 pubspec，带构建时间戳）
+tool/*.dart                  CSV 转换、城市列表（国家码映射数据维护）
 assets/                      country_codes.json（国家码映射数据）、图标、字体
-CFYXX-1.0.0-portable.zip     已构建的便携版
 ```
 
 ## 5. 核心数据流
@@ -182,11 +211,12 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 - **订阅转换**：`subInputMode`（node/url/both）、`subUrls`（支持 `标签|URL` 前缀）、`subGenerators`（`名称|域名|secret`）、`subNodeHost/subNodeUuid`（BEST_SUB 参数）、`subOutputFile`（默认 `addressesapi.txt`）、`subDefaultCountry`、`subResolveDomain`、抓取超时/重试参数、`subInsecure`（跳过 TLS 校验，默认 false）
 - **落地检测与输出**：`landingOutputFile`（默认 `addressesapi_top.txt`，落地检测写回 + GitHub/WebDAV 推送目标；旧键 `SUB_LATENCY_OUTPUT_FILE` 读取兜底）。落地检测**无代理参数**：`landingProxy` 已删除，旧键 `LANDING_PROXY` 读取时忽略；`probeEgresses`（多出口对照的出口清单，默认 `['本机直连|']`）
-- **GitHub**：`githubToken`、`githubRepo`（默认 `Hoffnungsschimmers/mnscn`，fromJson 兜底 `cf-ip`，两者分叉见 §10）、`githubBranch`
-- **自动更新**：开关 + 间隔（5–480 分钟），到点自动跑订阅转换
+- **GitHub**：`githubToken`、`githubRepo`（构造函数与 `fromJson` 兜底**都是** `Hoffnungsschimmers/mnscn`，已加回归测试防分叉）、`githubBranch`
+- **推送质量门槛**（手动与自动共用，配置页 GitHub 区块可调）：`pushMinimumNodes`（默认 1）、`pushMinimumMeasuredRatio`（默认 0.5，独立 IP 中 POP 实测的占比，GeoIP 估计不计入）、`pushMinimumRetainedRatio`（默认 0.5，相对上次成功推送基线的保留占比）。被拦截的结果仍留在本地，重复运行**不会**重置基线；只有成功推送才更新基线。
+- **自动更新**：`subAutoUpdateEnabled` + `subAutoUpdateIntervalMin`（配置页滑块 10–720 分钟，定时器按 `clamp(5, 720)` 兜底）+ `subAutoUpdateMode`（`subscription`｜`landing`｜`pipeline`，默认仅获取，避免升级后自动推送）。仅在软件运行期间生效（关到托盘仍跑），已有任务时跳过不排队，任务运行/同步/手动推送恢复互斥。
 - **Webhook / WebDAV / 外观 / 引导**：见 §5.3 与 `guiTheme`、`hasCompletedOnboarding`
 
-持久化（`ConfigRepository`）：SharedPreferences 存 `app_config_json` + schema 版本；`github_token`/`webhook_url`/`webdav_password` 三个敏感键单独走 SecureKV（系统安全存储），旧明文值启动时一次性迁移。旧版本废弃键（CF DNS/WxPusher/ASN/延迟优选参数等）读取时忽略。
+持久化（`ConfigRepository`）：SharedPreferences 存 `app_config_json` + schema 版本；`github_token`/`webhook_url`/`webdav_password` 三个敏感键单独走 SecureKV（系统安全存储），旧明文值启动时一次性迁移。旧版本废弃键（CF DNS/WxPusher/ASN/延迟优选参数等）读取时忽略。配置解析失败时**保留原始损坏文件备份**并用默认配置启动；保存经队列串行化，失败提示。
 
 配置页滑块范围（`config_tab.dart`）：连接超时 3–30s、总超时 5–120s、重试 0–5 次 / 0.5–10s、自动更新间隔 10–720 分钟、WebDAV 自动同步间隔 5–480 分钟。
 
@@ -194,8 +224,8 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 - **响应式**：Material 3 断点——手机（<600dp）底部 NavigationBar，桌面/平板（≥600dp）左侧 NavigationRail；系统字号缩放限制在 0.85–1.3。
 - **4 个 Tab**：配置 / 运行 / 结果 / 同步（GitHub）。Tab 栈用 Stack + Offstage 保活，切换带 fade+slide 动画。
-- **结果页筛选与分组**（2026-09-29）：操作行下方是**国家**筛选芯片（带行数，多选为「或」，与搜索框叠加，出现「清除筛选」）；开启「按国家分组」后每个国家各渲染一张带组标题（国家码 + 中文名 + 数量）的表格，按行数降序、无国家码的排最后。编辑模式不提供分组开关，避免拖拽/删除的下标跨组错乱。
-  **来源维度已删除**：曾实现过「来源芯片」（`detectSource` 用配置源名前缀匹配、否则取注释首段第一个 token），但真实数据里大量行提不出国家码 → 首段就是原始节点名（`订阅免费谨防受骗`、`0.51MB/s【TG:LSMOO】`、`====`…），芯片炸到上百个，毫无分类价值。教训：**给订阅节点做「来源」分类不可靠，能做维度的是落地国家码**。操作行另有「落地历史」按钮，弹出按 IP 展开的历次落地时间线（含当时的出口身份）。
+- **结果页分类已移除**：国家筛选芯片和按国家分组视图已删除（连同其测试 `results_filter_chips_test.dart`）。
+- **结果页编辑体系（2026-10-03）**：行编辑弹窗拆 `地址:端口` 与 `来源 备注` 两栏；另有「原始内容」可编辑视图，切回解析视图时 `applyRawText` **逐行**校验，任一行不是 `地址:端口` 就抛「第 N 行不是有效的地址:端口」并**整批拒绝**（不做部分应用）。只有与原节点**完全一致**的行保留实测证据，改过地址或注记的行证据清空、需重测。撤销/重做栈上限 30 步；`dirty` 未保存时切文件/重载会弹「继续编辑/丢弃」确认；保存走按路径串行的写队列。快照列表只列出 `snapshot_target` 等于当前文件的记录，恢复前先备份现文件。
 - **桌面特性**：关窗隐藏到系统托盘（`setPreventClose`），托盘菜单可触发订阅IP；window_manager 管窗口（最小 800×600）。
 - **快捷键**（`shortcuts.dart`）：Tab 切换/循环、刷新结果、编辑模式、运行订阅、取消运行。
 - **首启引导**：4 步向导（欢迎 → 输入模式 → GitHub → 完成），仅弹一次。
@@ -203,40 +233,34 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 
 ## 8. 测试
 
-- 35 个测试文件，**317 个用例全绿**（基线：`flutter test` 317/317；`flutter analyze` 全仓 0 error 0 warning、183 条 info）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
-- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、国家筛选与分组（`settings_results_test.dart` 的 `filterByCountries`/`countFacets`、`results_filter_chips_test.dart` 的芯片筛选、分组渲染与「不再有来源芯片」回归断言）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
+- 37 个测试文件，**336 个用例全绿**（基线：`flutter test` 336/336；`flutter analyze --no-fatal-infos` 0 error / 0 warning、204 条 info；均为 2026-10-06 实测）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
+- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
+- 可靠性与数据安全：`core/reliability_test.dart`（写临时文件-替换-恢复、内容哈希与旁文件错配拒绝、GeoIP 过期、脱敏）、`features/subscriptions/pipeline_reliability_test.dart`（固定本轮配置、检测中取消、动作互斥、数量骤减拦截、0 节点不写回）、`features/subscriptions/pipeline_test.dart`（一键全流程编排，须用 `SharedPreferences.setMockInitialValues` 种配置，见 §10）、`features/results/result_editing_test.dart`（行编辑/整段原始文本校验/撤销重做/未保存守卫/串行保存）。
 - 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。延迟片段**只认行尾形态**（`50.00 ms` / `56.00ms`），行中出现而后面还有文字的当作备注原文，避免整段被吞。
-- 测试全部入库（`responsive_narrow_test.dart`、`ip_count_box_test.dart`、`config_backfill_test.dart` 等曾长期只在工作区，现已随 `3b4eb6e` 提交）。
+- 测试全部入库；新增/删除用例后须同步本文数字与 `docs/RELEASE_NOTES.md`。国家筛选相关的 `results_filter_chips_test.dart` 已随功能删除，不要按旧文档重建。
 
-## 9. 历史沿革
+## 9. 当前状态与遗留事项（2026-10-06）
 
-- 旧版为 Python 脚本（AppConfig 注释可循痕迹：等价于旧版 pydantic `config.Config`），后重写为 Flutter。
-- `docs/superpowers/plans/` 保留了 2026-07~08 的开发计划：缺陷修复、订阅与延迟、UI 合并 Android、抓取重试配置、代码加固、首页空白与 GitHub 推送等。
-- 最近提交：`e23fdfe` 清理并推送完整项目（WebDAV 同步、IPv6 规范化、配置页重构、GitHub 推送），`bf51f88` 删除 README.md。当前分支 `push-clean` 与 `origin/main` 同步在此提交上。
+历史沿革、延迟优选移除过程（2026-09-20）与旧工作区快照已移至
+[`docs/archive/PROJECT_HISTORY.md`](docs/archive/PROJECT_HISTORY.md)，本文只描述当前代码。
 
-## 10. ⚠️ 当前工作区状态（截至 2026-09-20）
+**版本线**：`1.1.0+2`（`pubspec.yaml`、`lib/app/version.dart`、`msix_config.msix_version` 三处需同步）。
+远端 `origin` 已是 `Hoffnungsschimmers/dgbbsg`。`push-clean` 与 `origin/main` 同点。
 
-### 10.1 延迟优选功能已彻底移除（2026-09-20）
+**遗留事项**（逐项核实过现状）：
 
-梳理当日曾发现工作区处于「延迟优选模块被删一半」的编译不过状态（实现文件已删、调用方与测试仍引用，27 个 error）。当日先恢复对齐基线；随后用户确认产品范围——**「获取、落地地区、推送，就够了」**——据此把延迟优选整个删除：
+1. Android 只有 CI 构建，从未真机验收；release 签名未配置，APK 走 debug key。
+2. 无 GitHub Releases、无版本 tag，CI 产物 30 天过期即丢；本机 `gh` 未登录，无法直接查 CI 红绿。
+3. 分支拓扑待归一：本地 `main`（`8723274`）与 `push-clean` **无共同祖先**（不同血脉），另有
+   `refactor/hardening`、`feat/subscription-latency-ux`、`wip/ui-on-main-backup` 三个陈旧分支。
+   删分支/重置 main 属高危且不可逆，**未获得用户确认前不动**。
+4. 巨文件：`config_tab.dart` 1383 行、`results_tab.dart` 1309 行、`subscriptions_state.dart` 964 行——改动风险集中。
+5. 非 CF IP 的归属地兜底仍是**单源** `http://ip-api.com/batch`（明文 HTTP、45 req/min、每次最多 100 条），无备用源；缓存 7 天过期（`geo_cache.dart`）。
+6. 根目录历史发布产物（旧 `CFYXX-*` 包）与调试日志已清理，`.gitignore` 已补 `CFNB-*.zip` 等模式；`build/`、`dist/`、`.dart_tool/` 保留在本地不入库。
 
-- 删除 `lib/core/latency/`（prober/filter）与对应测试；纯解析函数统一收敛到 `lib/core/net/endpoint.dart`（此前两处重复，现只此一份）。
-- `subscriptions_state.dart`：删 `runLatency`/`runAll`/`RunAction.latency`，落地检测改用 `endpoint.dart` 的 `applyRealLanding`，并把落地输出改写为 `writeSubOutput`（附带 `.json` 旁文件，结果页时间戳保持新鲜）。
-- `AppConfig`：删 `subLatencyMaxMs/TopN/Timeout/Workers/Probes/MinSuccessRate`、`subAutoUpdateRunLatency`；`subLatencyOutputFile` 改名 `landingOutputFile`（新键 `LANDING_OUTPUT_FILE`，旧键 `SUB_LATENCY_OUTPUT_FILE` 兜底迁移）。
-- UI：运行页延迟按钮、配置页延迟滑块区（改「落地检测」区块）、引导页第 3 步延迟参数、托盘「运行延迟优选」、Ctrl+T 快捷键、导出 CSV 延迟列、编辑弹窗延迟输入框、theme 延迟配色全部移除。
-- 保留的容错：`parseResultLines`/`ResultRow.latency` 仍可解析历史文件行尾的延迟字符串（只读兼容，不再是功能）。
+**已定稿（不要再议）**：产品范围三步、不做延迟优选；落地检测保持**串行**、只走**直连**（不加并发、不留代理参数）；备注原样保留 `#`；提不出国家码写占位码 `UN`；`githubRepo` 两处默认一致；国家分类芯片与分组视图已删除，不要按旧文档重建。
 
-验证：`flutter analyze` **0 error**、lib/ 零 warning；`flutter test` **243/243 通过**。
-
-### 10.2 待确认事项（未擅自改）
-
-1. Android APK 本地从未验证构建（环境拉不到 AGP）；CI 修好后由 CI 回答。
-2. 远端仓库已迁移：`Hoffnungsschimmers/cfnb` → `Hoffnungsschimmers/dgbbsg`（push 时 GitHub 回显重定向）。本地 `origin` 与本文 §1 仍写旧地址，是否统一待确认。
-3. `.mimosa/` 是本地工具目录且未被 `.gitignore` 忽略，是否加忽略待确认。
-
-**已定稿（2026-09-29，用户确认）**：备注原样保留 `#`；提不出国家码的行写占位码 `UN`（原始名只进备注）；`githubRepo` 默认统一为 `Hoffnungsschimmers/mnscn`（构造函数与 `fromJson` 兜底一致，已加回归测试）；落地检测**保持串行**，不加并发。
-
-## 11. 开发约定（硬教训，沿自 HANDOVER §7）
+## 10. 开发约定（硬教训）
 
 - **标签剥离必须用 `supportedSchemes`**：判断「备注|URL」是否带标签前缀时用 `supportedSchemes.any((s) => url.startsWith(s))`，绝不能用 `contains('://')`——备注本身含 URL 时会被误判。涉及 `config_tab.dart` 与 `subscription_converter.dart`。
 - **删功能要删干净**：grep 全仓删残留再复查（历史教训：`maxSpeedMbps` 带宽测速残留；延迟优选移除也按此执行——模块、配置字段、UI、托盘、快捷键、导出列全删，仅保留旧文件读取容错）。
@@ -249,7 +273,7 @@ CFYXX-1.0.0-portable.zip     已构建的便携版
 - **沟通语言**：简体中文，先结论后细节。
 - 提交/改代码前先跑 `flutter test` + `flutter analyze`（全仓零 error/warning）验证。
 
-## 12. CI 与 Windows 构建环境（2026-09-29 实测）
+## 11. CI 与 Windows 构建环境（2026-09-29 实测）
 
 ### CI（`.github/workflows/ci.yml`）
 
