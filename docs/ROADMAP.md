@@ -2,7 +2,10 @@
 
 > **2026-10-06 整理轮**：文档已三合一（`PROJECT_CONTEXT.md`、`HANDOVER.md` 删除，历史章节移入
 > `docs/archive/PROJECT_HISTORY.md`，根目录只留 README + PROJECT_OVERVIEW）；根目录旧发布产物与调试日志已清理，
-> `.gitignore` 补上 `CFNB-*.zip` 等模式。质量基线更新为 `flutter test` 336/336、`flutter analyze` 0 error / 0 warning / 204 info。
+> `.gitignore` 补上 `CFNB-*.zip` 等模式；一直未提交的 1.1.0+2 整轮代码已按主题提交（见 `git log`）。
+> 质量基线更新为 `flutter test` 348/348、`flutter analyze` 0 error / 0 warning / 204 info。
+> `config_tab.dart` 拆出 `config_entries.dart`（纯解析，补了 12 条直测）与 `config_item_widgets.dart`（条目控件），
+> 1383 行 → 1069 行；`results_tab.dart` 尚未处理。
 > **分支拓扑未动**（见下方 P0 的「分支归一」，仍需用户确认）。
 >
 > **2026-10-02 状态**：用户确认的进度/取消、固定配置、推送保护、证据展示、本地恢复、自动任务模式、WebDAV 安全备份与状态、日志、缓存过期、模板说明和 Windows 版本打包已实现。验证记录见 [本轮交接](IMPLEMENTATION_20261002.md)，使用说明见 [README](../README.md)。
@@ -82,8 +85,8 @@
 
 ### 3.4 代码减债（与 3.1~3.3 同期穿插）
 
-- `config_tab.dart`（1322 行）按区块拆为多文件（订阅/落地检测/GitHub/Webhook/WebDAV/外观各一），行为不变，靠现有 `config_tab_test.dart` 保护。
-- `results_tab.dart`（839 行）把表格、筛选芯片、导出抽成独立组件。
+- `config_tab.dart`（1322 行）按区块拆为多文件（订阅/落地检测/GitHub/Webhook/WebDAV/外观各一），行为不变，靠现有 `config_tab_test.dart` 保护。**部分完成（2026-10-06）**：纯解析逻辑进 `config_entries.dart`、条目卡片/编辑弹窗/批量控件进 `config_item_widgets.dart`，1383 → 1069 行。剩下的区块构建方法与 `_save`、控制器回填同生命周期，拆成独立子 widget 要先解决 §10 的 `ref.listenManual` 回填坑，不建议顺手做。
+- `results_tab.dart`（839 行）把表格、筛选芯片、导出抽成独立组件。**已部分失效**：筛选芯片随功能删除；文件现为 1309 行（新增行编辑、整段原始内容编辑、撤销/重做、落地历史、快照恢复），拆分前应先按当前职责重新列清单。
 
 **P1 验收**：一键流水线可从点击到 GitHub 推送全程无人值守；落地检测有进度条与重试；`flutter test` ≥ 300 用例全绿。
 

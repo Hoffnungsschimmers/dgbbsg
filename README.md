@@ -23,7 +23,7 @@ WebDAV 配置备份排除 GitHub Token、Webhook URL、WebDAV 密码、订阅链
 
 本机验证环境：Flutter 3.44.6 / Dart 3.12.2；CI 固定 Flutter 3.44.6。Windows 构建需要 Visual Studio C++ 桌面开发工具链（含 ATL 组件）。
 
-质量基线（2026-10-06 实测）：`flutter analyze --no-fatal-infos` 为 0 error / 0 warning / 204 info，`flutter test` 为 336/336 全绿。两者都过才算改完。
+质量基线（2026-10-06 实测）：`flutter analyze --no-fatal-infos` 为 0 error / 0 warning / 204 info，`flutter test` 为 348/348 全绿（38 个测试文件）。两者都过才算改完。全量并行跑若只在 tearDown 删临时目录时抛 `PathAccessException errno=32`，是 Windows 句柄占用，不是用例回归。
 
 ```powershell
 flutter pub get

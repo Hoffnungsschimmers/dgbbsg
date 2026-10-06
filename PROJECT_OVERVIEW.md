@@ -5,7 +5,7 @@
 > 逐轮验收记录见 `docs/IMPLEMENTATION_*.md`，后续规划见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 > 历史沿革与旧工作区快照已移至 [`docs/archive/PROJECT_HISTORY.md`](docs/archive/PROJECT_HISTORY.md)。
 >
-> **当前状态（2026-10-06 实测）**：版本 `1.1.0+2`；`flutter test` **336/336 全绿**（37 个测试文件）；
+> **当前状态（2026-10-06 实测）**：版本 `1.1.0+2`；`flutter test` **348/348 全绿**（38 个测试文件）；
 > `flutter analyze --no-fatal-infos` **0 error / 0 warning / 204 info**，退出码 0。
 > 产品范围为三步：**获取订阅 → 落地检测 → 推送**（延迟优选 TCP 测速已于 2026-09-20 按用户决定彻底移除）。
 > 落地检测**只走直连**并记录出口身份；结果页的分类芯片与分组视图已移除，保留搜索、排序、行编辑与整段原始内容编辑。
@@ -41,7 +41,7 @@
 ```powershell
 flutter pub get
 flutter analyze --no-fatal-infos   # 基线：0 error / 0 warning（204 条 info 属正常，CI 同样容忍 info）
-flutter test                       # 基线：336/336 通过（2026-10-06 实测）
+flutter test                       # 基线：348/348 通过（2026-10-06 实测）
 flutter build windows --release
 # 产物：build/windows/x64/runner/Release/cfnb_app.exe
 # 注意：Windows 构建需要 MSVC 工具链（Visual Studio 2022 的「C++ 桌面负载」+ ATL 组件），
@@ -133,9 +133,12 @@ lib/
 │                                    轮换一次；入内存/落盘/导出前统一脱敏，落盘失败不影响任务
 ├── features/
 │   ├── subscriptions/
-│   │   ├── config_tab.dart          配置页：订阅输入（node/url/both 模式）、抓取参数、
+│   │   ├── config_tab.dart          配置页主体：订阅输入（node/url/both 模式）、抓取参数、
 │   │   │                            落地检测与多出口探测、定时更新三模式、GitHub（含推送门槛）、
 │   │   │                            Webhook、WebDAV、外观
+│   │   │   ├── config_entries.dart  条目纯解析：订阅器 `名称|域名|secret`、订阅链接 `备注|URL`
+│   │   │   │                        （标签剥离只认 supportedSchemes，见 §10）
+│   │   │   ├── config_item_widgets.dart 条目卡片 / 编辑弹窗 / 批量小标签 / 批量粘贴弹窗
 │   │   ├── run_tab.dart             运行页：获取订阅 / 测落地（直连 + 出口身份）/ 多出口对照 /
 │   │   │                            一键全流程（获取 → 测落地 → 推送）按钮，阶段进度与处理数量、
 │   │   │                            运行摘要、停止按钮 + 实时日志（可导出）
@@ -157,7 +160,8 @@ lib/
                                 （`%USERPROFILE%\Documents\addressesapi.txt` /
                                  `..._top.txt` + 同名 `.json` 旁文件 + 同级 `history/` 快照）
 
-test/                        37 个测试文件、336 个用例（app/core/features 分层）
+test/                        38 个测试文件、348 个用例（app/core/features 分层；
+                             helpers/temp_dir.dart 是用例临时目录清理工具，非用例）
 docs/                        RELEASE_NOTES / ROADMAP / IMPLEMENTATION_*（逐轮验收）/
                              archive（历史沿革）/ superpowers（2026-07~08 历史计划与 spec）
 scripts/build_windows.ps1    MSIX + 便携 zip 发布脚本（需管理员 PowerShell）
@@ -233,8 +237,8 @@ assets/                      country_codes.json（国家码映射数据）、图
 
 ## 8. 测试
 
-- 37 个测试文件，**336 个用例全绿**（基线：`flutter test` 336/336；`flutter analyze --no-fatal-infos` 0 error / 0 warning、204 条 info；均为 2026-10-06 实测）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
-- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）。
+- 38 个测试文件，**348 个用例全绿**（基线：`flutter test` 348/348；`flutter analyze --no-fatal-infos` 0 error / 0 warning、204 条 info；均为 2026-10-06 实测）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
+- 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）、**标签剥离规则本身有直测**（`config_entries_test.dart`：备注自身含 `://`、`|` 之后为空、节点链接不拼备注、拆拼往返不变形）。
 - 可靠性与数据安全：`core/reliability_test.dart`（写临时文件-替换-恢复、内容哈希与旁文件错配拒绝、GeoIP 过期、脱敏）、`features/subscriptions/pipeline_reliability_test.dart`（固定本轮配置、检测中取消、动作互斥、数量骤减拦截、0 节点不写回）、`features/subscriptions/pipeline_test.dart`（一键全流程编排，须用 `SharedPreferences.setMockInitialValues` 种配置，见 §10）、`features/results/result_editing_test.dart`（行编辑/整段原始文本校验/撤销重做/未保存守卫/串行保存）。
 - 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。延迟片段**只认行尾形态**（`50.00 ms` / `56.00ms`），行中出现而后面还有文字的当作备注原文，避免整段被吞。
 - 测试全部入库；新增/删除用例后须同步本文数字与 `docs/RELEASE_NOTES.md`。国家筛选相关的 `results_filter_chips_test.dart` 已随功能删除，不要按旧文档重建。
@@ -254,15 +258,19 @@ assets/                      country_codes.json（国家码映射数据）、图
 3. 分支拓扑待归一：本地 `main`（`8723274`）与 `push-clean` **无共同祖先**（不同血脉），另有
    `refactor/hardening`、`feat/subscription-latency-ux`、`wip/ui-on-main-backup` 三个陈旧分支。
    删分支/重置 main 属高危且不可逆，**未获得用户确认前不动**。
-4. 巨文件：`config_tab.dart` 1383 行、`results_tab.dart` 1309 行、`subscriptions_state.dart` 964 行——改动风险集中。
-5. 非 CF IP 的归属地兜底仍是**单源** `http://ip-api.com/batch`（明文 HTTP、45 req/min、每次最多 100 条），无备用源；缓存 7 天过期（`geo_cache.dart`）。
-6. 根目录历史发布产物（旧 `CFYXX-*` 包）与调试日志已清理，`.gitignore` 已补 `CFNB-*.zip` 等模式；`build/`、`dist/`、`.dart_tool/` 保留在本地不入库。
+4. 巨文件：`results_tab.dart` 1309 行、`config_tab.dart` 1069 行（2026-10-06 已拆出 `config_entries.dart` 纯解析与 `config_item_widgets.dart` 条目控件；剩余区块与 `_save`/控制器回填强耦合，硬拆会碰 §10 的 `ref.listenManual` 坑）、`subscriptions_state.dart` 964 行。
+5. 配置页与订阅转换各有一份「备注|URL」标签剥离实现（`config_entries.dart` 与 `subscription_converter.fetchSingle`），规则相同但代码未合并——合并会动到抓取主路径，需单独一轮带测试的改动。
+6. 非 CF IP 的归属地兜底仍是**单源** `http://ip-api.com/batch`（明文 HTTP、45 req/min、每次最多 100 条），无备用源；缓存 7 天过期（`geo_cache.dart`）。
+
+**已完成（2026-10-06）**：根目录历史发布产物（旧 `CFYXX-*` 包）、调试日志与 7 月的结果样本文件已清理；
+`.gitignore` 补上 `CFNB-*.zip` / `*-windows-portable*.zip` / `*.zip.sha256`，堵住 `git add -A` 误提二进制；
+`build/`、`dist/`、`.dart_tool/` 保留在本地不入库。
 
 **已定稿（不要再议）**：产品范围三步、不做延迟优选；落地检测保持**串行**、只走**直连**（不加并发、不留代理参数）；备注原样保留 `#`；提不出国家码写占位码 `UN`；`githubRepo` 两处默认一致；国家分类芯片与分组视图已删除，不要按旧文档重建。
 
 ## 10. 开发约定（硬教训）
 
-- **标签剥离必须用 `supportedSchemes`**：判断「备注|URL」是否带标签前缀时用 `supportedSchemes.any((s) => url.startsWith(s))`，绝不能用 `contains('://')`——备注本身含 URL 时会被误判。涉及 `config_tab.dart` 与 `subscription_converter.dart`。
+- **标签剥离必须用 `supportedSchemes`**：判断「备注|URL」是否带标签前缀时用 `supportedSchemes.any((s) => url.startsWith(s))`，绝不能用 `contains('://')`——备注本身含 URL 时会被误判。涉及 `features/subscriptions/config_entries.dart`（2026-10-06 从 config_tab 抽出，已有 `config_entries_test.dart` 直测）与 `core/subscription/subscription_converter.dart` 的 `fetchSingle`。
 - **删功能要删干净**：grep 全仓删残留再复查（历史教训：`maxSpeedMbps` 带宽测速残留；延迟优选移除也按此执行——模块、配置字段、UI、托盘、快捷键、导出列全删，仅保留旧文件读取容错）。
 - **`ref.listenManual` 不会补发当前值**：`config_tab.dart` 曾在 `initState` 里用它回填输入框，但主窗口先读过 `configProvider` 时该 provider 已是 data，监听器永不触发 → 配置页所有输入框显示为空（**数据其实完好**，运行时用的也是正确配置）。正解二选一：① `fireImmediately: true`，但此时回调发生在 initState 内，**不能**在其中写 provider（`latestConfigProvider` 的 `??=` 必须 `addPostFrameCallback` 推后，否则 Riverpod 断言「Tried to modify a provider while the widget tree was building」）；② 像 `results_tab.dart` 那样先 `ref.read(configProvider).valueOrNull` 兜一次再监听。判据：用户报「配置丢了」但抓订阅行为正常 → 先查回填，别查存储。
 - **注释里国家码必须在 `#` 后第一个 token**：`findCcSourceSep`、结果页 `country`/`source`、`applyRealLanding` 都按这个位置切分，备注只能跟在后面。
@@ -270,6 +278,9 @@ assets/                      country_codes.json（国家码映射数据）、图
 - **测 notifier 编排要种 prefs，只 override `configProvider` 没用**：`_cfg()` 走 `readLatestConfig` → 优先 `latestConfigProvider`，否则 `repo.current`。空 SharedPreferences 会回落到**默认配置（`both` + 内置 10 个订阅器）**，于是测试真的去发请求（测试绑定一律返回 400 → 触发退避重试 → 用例超时 30s）。正解是 `SharedPreferences.setMockInitialValues({'flutter.app_config_json': ...})` 把目标配置种进去，见 `pipeline_test.dart`。
 - **`testWidgets` 里不要直接 await 含异步依赖的链**：fake async 区里定时器要靠 `pump` 才走；纯逻辑编排用例用普通 `test()` + `ProviderContainer` 更省事（也避开 widget 绑定对 HttpClient 的拦截语义）。
 - **仓库正文是 LF，脚本改文件必须用二进制模式**：`core.autocrlf=false` 且没有 `.gitattributes`，git 不做行尾转换。用 Python 文本模式 `open(path,'w')` 重写会把文件整份换成 CRLF，一次提交能产生 4047 增 / 4047 删的整文件 diff，把真实改动全埋掉。判据：`git diff --ignore-cr-at-eol --stat` 输出为空 → 纯行尾噪音。改文件优先用编辑工具，必须脚本化时走 `open(path,'wb')`。
+- **行尾噪音两个方向都要查**：漏网的不止 CRLF 写回，还有整仓里唯一存成 `i/crlf` 的文件被工具顺手降为 LF——同样表现为整文件 diff（2026-10-06 的 `subscription_converter_test.dart`，`c417a28` 统一行尾时漏掉它）。判据是 `git ls-files --eol`（列 1 是 index、列 2 是工作区），别只看 `git diff --stat`。
+- **批量改文件不要用拼出来的 sed/awk**：本轮用变量转义锚点的 `sed -i` 批量插 import，正则被转义搞坏成「匹配几乎所有行」，把 import 插进了类体；`git restore` 回到刚提交的 HEAD 再逐个用编辑工具改，代价更低。规则：改完立刻 `git diff --numstat` 核对行数是否符合预期（改 5 个文件应是十几行，出现 344/343 就是坏了）。
+- **Windows 全量跑会偶发临时目录删除失败，别当成用例回归**：tearDown 里 `dir.delete(recursive: true)` 撞上杀软/索引仍持有的句柄会抛 `PathAccessException errno=32`，并行全量跑偶发红一条、单跑恒过。清理临时目录不是被测行为，`test/helpers/temp_dir.dart` 的 `removeTempDir` 重试 10 次后放弃。**只在普通 `test()` 用**：`testWidgets` 的 fake async 区里 `Future.delayed` 要靠 `pump` 才走，加进去直接超时。
 - **沟通语言**：简体中文，先结论后细节。
 - 提交/改代码前先跑 `flutter test` + `flutter analyze`（全仓零 error/warning）验证。
 
