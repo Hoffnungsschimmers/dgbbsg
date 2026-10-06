@@ -177,10 +177,16 @@ ip.txt
 addressesapi*.txt
 history/
 
-# 发布产物（由 scripts/build_windows.ps1 生成，勿入库）
+# 发布产物（Windows 由 scripts/build_windows.ps1 / package-windows.ps1 生成，
+# Android 由 flutter build apk 生成；包名随产品名变过 CFYXX→CFNB，故一并兜住）
 CFYXX-*.zip
+CFYXX-*.apk
+CFNB-*.zip
+*-windows-portable*.zip
+*.apk
 *.msix
 *.msixbundle
+*.zip.sha256
 test_certificate.pfx
 
 
@@ -216,3 +222,5 @@ android/gradle.properties
 # 本地工具目录，勿入库
 .mimosa/
 
+# 本机验证日志（任务工具产生，勿入库）
+.codex-*.log

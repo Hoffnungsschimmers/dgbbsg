@@ -20,6 +20,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: stable
           cache: true
 
@@ -36,6 +37,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: stable
           cache: true
 
@@ -61,6 +63,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: stable
           cache: true
 
@@ -72,11 +75,11 @@ jobs:
       - name: 打包便携版
         shell: pwsh
         run: |
-          $distDir = "dist"
-          if (Test-Path $distDir) { Remove-Item -Recurse -Force $distDir }
+          $distDir = "dist-ci"
+          # Fresh runner; preserve any existing directories.
           New-Item -ItemType Directory -Path $distDir | Out-Null
           $buildDir = "build\windows\x64\runner\Release"
-          Copy-Item "$buildDir\*" -Destination $distDir -Recurse
+          Get-ChildItem -LiteralPath $buildDir | Where-Object { $_.Extension -ne '.msix' } | Copy-Item -Destination $distDir -Recurse
           Compress-Archive -Path "$distDir\*" -DestinationPath "CFNB-windows-portable.zip"
 
       - name: 上传构建产物
@@ -101,6 +104,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.44.6'
           channel: stable
           cache: true
 
