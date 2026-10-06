@@ -7,8 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../app/theme.dart';
 import '../../core/config/app_config.dart';
-import '../../core/subscription/sub_parser.dart' show supportedSchemes;
 import '../widgets/common.dart';
+import 'config_entries.dart';
+import 'config_item_widgets.dart';
 
 class ConfigTab extends ConsumerStatefulWidget {
   const ConfigTab({super.key});
@@ -321,17 +322,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                 style: TextStyle(fontSize: 12, color: t.textDim)),
             const SizedBox(width: 8),
             // 批量全选/全不选
-            _batchToggleChip(
+            batchToggleChip(context, 
               label: '全选',
               active: disabled.isEmpty,
               onTap: () => _save(cfg.copyWith(subDisabledGenerators: {})),
             ),
             const SizedBox(width: 4),
-            _batchToggleChip(
+            batchToggleChip(context, 
               label: '全不选',
               active: disabled.length == cfg.subGenerators.length,
               onTap: () {
-                final all = cfg.subGenerators.map(_genName).toSet();
+                final all = cfg.subGenerators.map(generatorName).toSet();
                 _save(cfg.copyWith(subDisabledGenerators: all));
               },
             ),
@@ -341,20 +342,20 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
 
         // 列表
         for (var i = 0; i < cfg.subGenerators.length; i++)
-          _buildItemCard(
+          buildItemCard(
             context,
-            note: _genName(cfg.subGenerators[i]),
-            value: _genHost(cfg.subGenerators[i]),
-            isEnabled: !disabled.contains(_genName(cfg.subGenerators[i])),
-            onTapEdit: () => _showItemEditor(
+            note: generatorName(cfg.subGenerators[i]),
+            value: generatorHost(cfg.subGenerators[i]),
+            isEnabled: !disabled.contains(generatorName(cfg.subGenerators[i])),
+            onTapEdit: () => showItemEditor(context, 
               title: '编辑订阅器',
               noteLabel: '备注',
               valueLabel: '域名',
               showSecret: true,
               secretLabel: '密钥（可选）',
-              note: _genName(cfg.subGenerators[i]),
-              value: _genHost(cfg.subGenerators[i]),
-              secret: _genSecret(cfg.subGenerators[i]),
+              note: generatorName(cfg.subGenerators[i]),
+              value: generatorHost(cfg.subGenerators[i]),
+              secret: generatorSecret(cfg.subGenerators[i]),
               onSave: (note, value, secret) {
                 // 备注为空时回退用域名，保证 `名称|域名` 格式不断裂。
                 final name = note.isEmpty ? value : note;
@@ -364,7 +365,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
               },
             ),
             onToggle: () {
-              final name = _genName(cfg.subGenerators[i]);
+              final name = generatorName(cfg.subGenerators[i]);
               final set = {...disabled};
               set.contains(name) ? set.remove(name) : set.add(name);
               _save(cfg.copyWith(subDisabledGenerators: set));
@@ -382,7 +383,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.add, size: 18),
               label: const Text('添加', style: TextStyle(fontSize: 13)),
-              onPressed: () => _showItemEditor(
+              onPressed: () => showItemEditor(context, 
                 title: '添加订阅器',
                 noteLabel: '备注',
                 valueLabel: '域名',
@@ -400,7 +401,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.content_paste, size: 18),
               label: const Text('批量粘贴', style: TextStyle(fontSize: 13)),
-              onPressed: () => _showBatchPasteDialog(
+              onPressed: () => showBatchPasteDialog(context, 
                 title: '批量添加订阅器',
                 hint: '每行一个，格式：名称|域名',
                 onConfirm: (lines) {
@@ -435,13 +436,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             Text('$enabledCount/${cfg.subUrls.length} 启用',
                 style: TextStyle(fontSize: 12, color: t.textDim)),
             const SizedBox(width: 8),
-            _batchToggleChip(
+            batchToggleChip(context, 
               label: '全选',
               active: disabled.isEmpty && cfg.subUrls.isNotEmpty,
               onTap: () => _save(cfg.copyWith(subDisabledUrls: {})),
             ),
             const SizedBox(width: 4),
-            _batchToggleChip(
+            batchToggleChip(context, 
               label: '全不选',
               active: cfg.subUrls.every((u) => disabled.contains(u.trim())),
               onTap: () {
@@ -454,20 +455,20 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
         const SizedBox(height: 8),
 
         for (var i = 0; i < cfg.subUrls.length; i++)
-          _buildItemCard(
+          buildItemCard(
             context,
-            note: _urlNote(cfg.subUrls[i]),
-            value: _urlValue(cfg.subUrls[i]),
+            note: urlNote(cfg.subUrls[i]),
+            value: urlValue(cfg.subUrls[i]),
             isEnabled: !disabled.contains(cfg.subUrls[i].trim()),
-            onTapEdit: () => _showItemEditor(
+            onTapEdit: () => showItemEditor(context, 
               title: '编辑订阅链接',
               noteLabel: '备注',
               valueLabel: '链接',
-              note: _urlNote(cfg.subUrls[i]),
-              value: _urlValue(cfg.subUrls[i]),
+              note: urlNote(cfg.subUrls[i]),
+              value: urlValue(cfg.subUrls[i]),
               onSave: (note, value, _) {
                 final list = [...cfg.subUrls];
-                list[i] = _joinNoteValue(note, value);
+                list[i] = joinNoteValue(note, value);
                 _save(cfg.copyWith(subUrls: list));
               },
             ),
@@ -489,12 +490,12 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.add, size: 18),
               label: const Text('添加', style: TextStyle(fontSize: 13)),
-              onPressed: () => _showItemEditor(
+              onPressed: () => showItemEditor(context, 
                 title: '添加订阅链接',
                 noteLabel: '备注',
                 valueLabel: '链接',
                 onSave: (note, value, _) {
-                  _save(cfg.copyWith(subUrls: [...cfg.subUrls, _joinNoteValue(note, value)]));
+                  _save(cfg.copyWith(subUrls: [...cfg.subUrls, joinNoteValue(note, value)]));
                 },
               ),
             ),
@@ -502,7 +503,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             OutlinedButton.icon(
               icon: const Icon(Icons.content_paste, size: 18),
               label: const Text('批量粘贴', style: TextStyle(fontSize: 13)),
-              onPressed: () => _showBatchPasteDialog(
+              onPressed: () => showBatchPasteDialog(context, 
                 title: '批量添加订阅链接',
                 hint: '每行一个链接',
                 onConfirm: (lines) {
@@ -515,266 +516,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
           ],
         ),
       ],
-    );
-  }
-
-  /// 列表项：静态卡片（备注 + 内容），点击整卡弹出编辑对话框。
-  /// 开关与删除保持行内大点击区域，编辑通过弹窗完成（避免行内小框难输入）。
-  Widget _buildItemCard(
-    BuildContext context, {
-    required String note,
-    required String value,
-    required bool isEnabled,
-    required VoidCallback onTapEdit,
-    required VoidCallback onToggle,
-    required VoidCallback onDelete,
-  }) {
-    final t = AppThemeExt.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTapEdit,
-          child: Ink(
-            decoration: BoxDecoration(
-              color: isEnabled ? t.surface : t.surfaceHover.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isEnabled ? t.border : t.border.withValues(alpha: 0.5),
-              ),
-            ),
-            child: Row(
-              children: [
-                // 内联开关（点击区域大，方便快速切换）
-                InkWell(
-                  borderRadius: BorderRadius.circular(10),
-                  onTap: onToggle,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                    child: Icon(
-                      isEnabled ? Icons.toggle_on : Icons.toggle_off,
-                      color: isEnabled ? AppTheme.edgeOrange : t.textDim,
-                      size: 30,
-                    ),
-                  ),
-                ),
-                // 备注 + 内容（静态显示，点击弹窗编辑）
-                Expanded(
-                  child: InkWell(
-                    onTap: onTapEdit,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            note.isEmpty ? '（未命名）' : note,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: isEnabled ? t.text : t.textDim,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            value,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontFamily: 'AppMono',
-                              fontSize: 12,
-                              color: isEnabled ? t.textDim : t.textDim.withValues(alpha: 0.6),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                // 删除按钮
-                IconButton(
-                  icon: Icon(Icons.close, size: 18, color: t.textDim),
-                  tooltip: '删除',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onDelete,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 编辑/新增条目弹窗：备注 + 内容（订阅器另有密钥）双框全宽输入。
-  void _showItemEditor({
-    required String title,
-    required String noteLabel,
-    required String valueLabel,
-    required void Function(String note, String value, String secret) onSave,
-    String? note,
-    String? value,
-    String? secret,
-    bool showSecret = false,
-    String? secretLabel,
-  }) {
-    final noteCtl = TextEditingController(text: note ?? '');
-    final valueCtl = TextEditingController(text: value ?? '');
-    final secretCtl = TextEditingController(text: secret ?? '');
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        final t = AppThemeExt.of(ctx);
-        return AlertDialog(
-          title: Text(title, style: const TextStyle(fontSize: 17)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(noteLabel,
-                    style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 4),
-                TextField(
-                  key: const Key('editor_note'),
-                  controller: noteCtl,
-                  autofocus: true,
-                  style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '备注（显示在列表中的名称）',
-                    hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(valueLabel,
-                    style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 4),
-                TextField(
-                  key: const Key('editor_value'),
-                  controller: valueCtl,
-                  keyboardType: TextInputType.url,
-                  style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: valueLabel == '链接' ? 'https://…' : '域名',
-                    hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                  ),
-                ),
-                if (showSecret) ...[
-                  const SizedBox(height: 12),
-                  Text(secretLabel ?? '密钥（可选）',
-                      style: TextStyle(fontSize: 12, color: t.textDim, fontWeight: FontWeight.w500)),
-                  const SizedBox(height: 4),
-                  TextField(
-                    key: const Key('editor_secret'),
-                    controller: secretCtl,
-                    style: const TextStyle(fontFamily: 'AppMono', fontSize: 15),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'edgetunnel 部署 uuid 或 token',
-                      hintStyle: TextStyle(color: t.textDim.withValues(alpha: 0.5), fontSize: 13),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-            FilledButton(
-              onPressed: () {
-                final n = noteCtl.text.trim();
-                final v = valueCtl.text.trim();
-                final s = secretCtl.text.trim();
-                if (v.isEmpty) {
-                  AppToast.show(ctx, '$valueLabel 不能为空', success: false);
-                  return;
-                }
-                onSave(n, v, s);
-                Navigator.pop(ctx);
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// 订阅器：名称 = 第一个 | 段
-  String _genName(String entry) => entry.split('|').first.trim();
-
-  /// 订阅器：域名 = 第二个 | 段（无则整个条目）
-  String _genHost(String entry) {
-    final parts = entry.split('|');
-    return parts.length > 1 ? parts[1].trim() : entry.trim();
-  }
-
-  /// 订阅器：密钥 = 第三个 | 段
-  String _genSecret(String entry) {
-    final parts = entry.split('|');
-    return parts.length > 2 ? parts.sublist(2).join('|').trim() : '';
-  }
-
-  /// 订阅链接：备注 = 第一个 | 段。
-  /// 节点分享链接（vless/vmess/trojan/ss/ssr/hysteria2/hy2/tuic）本身不带
-  /// 「备注|」前缀；只有 http(s) 订阅地址支持标签前缀。
-  /// 用 supportedSchemes 精确判断，避免把含 "://" 的备注误判为节点链接
-  /// （如 "备注A|https://…" 含 :// 但仍是带标签的订阅地址）。
-  String _urlNote(String url) {
-    final u = url.trim();
-    if (supportedSchemes.any((s) => u.startsWith(s))) return '';
-    final pipeIdx = u.indexOf('|');
-    if (pipeIdx > 0) return u.substring(0, pipeIdx).trim();
-    return '';
-  }
-
-  /// 订阅链接：实际链接 = | 之后部分（无 | 则整体）
-  String _urlValue(String url) {
-    final u = url.trim();
-    if (supportedSchemes.any((s) => u.startsWith(s))) return u;
-    final pipeIdx = u.indexOf('|');
-    if (pipeIdx > 0) {
-      final after = u.substring(pipeIdx + 1).trim();
-      if (after.isNotEmpty) return after;
-    }
-    return u;
-  }
-
-  /// 备注 + 链接 拼回存储格式（节点分享链接不拼备注）
-  String _joinNoteValue(String note, String value) {
-    final v = value.trim();
-    if (supportedSchemes.any((s) => v.startsWith(s))) return v;
-    final n = note.trim();
-    return n.isEmpty ? v : '$n|$v';
-  }
-
-  /// 批量操作小标签按钮
-  Widget _batchToggleChip({required String label, required bool active, required VoidCallback onTap}) {
-    final t = AppThemeExt.of(context);
-    return InkWell(
-      borderRadius: BorderRadius.circular(4),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: active ? AppTheme.edgeOrange.withValues(alpha: 0.15) : t.surfaceHover,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: active ? AppTheme.edgeOrange.withValues(alpha: 0.3) : t.border),
-        ),
-        child: Text(label, style: TextStyle(fontSize: 11, color: active ? AppTheme.edgeOrange : t.textDim)),
-      ),
     );
   }
 
@@ -933,61 +674,6 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
           ),
         ),
       ],
-    );
-  }
-
-  /// 批量粘贴对话框
-  void _showBatchPasteDialog({
-    required String title,
-    required String hint,
-    required void Function(List<String> lines) onConfirm,
-  }) {
-    final ctl = TextEditingController();
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        final t = AppThemeExt.of(ctx);
-        return AlertDialog(
-          title: Text(title),
-          content: SizedBox(
-            width: 500,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(hint, style: TextStyle(fontSize: 13, color: t.textDim)),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: ctl,
-                  maxLines: 10,
-                  style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
-                  decoration: InputDecoration(
-                    hintText: '在此粘贴，每行一个…',
-                    hintStyle: TextStyle(color: t.textDim, fontSize: 13),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    contentPadding: const EdgeInsets.all(12),
-                  ),
-                  autofocus: true,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-            FilledButton(
-              onPressed: () {
-                final lines = ctl.text
-                    .split('\n')
-                    .map((l) => l.trim())
-                    .where((l) => l.isNotEmpty)
-                    .toList();
-                if (lines.isNotEmpty) onConfirm(lines);
-                Navigator.pop(ctx);
-              },
-              child: const Text('添加'),
-            ),
-          ],
-        );
-      },
     );
   }
 
