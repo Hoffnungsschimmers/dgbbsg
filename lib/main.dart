@@ -19,6 +19,8 @@ import 'features/results/result_state.dart';
 import 'features/subscriptions/subscriptions_state.dart';
 import 'features/widgets/common.dart';
 import 'package:path_provider/path_provider.dart';
+import 'core/logging/app_logger.dart';
+import 'app/version.dart';
 
 /// Global instance so the app shell can access it.
 final SystemTrayManager systemTrayManager = SystemTrayManager();
@@ -36,7 +38,7 @@ Future<void> main() async {
 
     const windowOptions = WindowOptions(
       minimumSize: Size(800, 600),
-      title: 'CFNB - CF优选工具',
+      title: 'CFNB - CF优选工具 $appVersion',
     );
     await windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();
@@ -110,11 +112,19 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
 
   /// 自动同步：推送配置 + 结果文件（失败静默，下次到点重试）。
   Future<void> _runWebDavAutoSync() async {
+    if (!mounted || ref.read(webDavBusyProvider) || ref.read(subProvider).running) return;
+    ref.read(webDavBusyProvider.notifier).state = true;
+    ref.read(webDavStatusProvider.notifier).state = 'WebDAV 自动备份中…';
+    WebDavClient? client;
     try {
       var cfg = ref.read(latestConfigProvider);
       cfg ??= (await ref.read(configRepositoryProvider.future)).current;
-      if (!cfg.webdavAutoSync || cfg.webdavUrl.trim().isEmpty) return;
-      final client = WebDavClient(
+      if (!mounted) return;
+      if (!cfg.webdavAutoSync || cfg.webdavUrl.trim().isEmpty) {
+        ref.read(webDavStatusProvider.notifier).state = 'WebDAV 自动备份已停用';
+        return;
+      }
+      client = WebDavClient(
         baseUrl: cfg.webdavUrl.trim(),
         user: cfg.webdavUser.trim(),
         password: cfg.webdavPassword,
@@ -122,9 +132,18 @@ class _MyAppState extends ConsumerState<MyApp> with WindowListener {
       await WebDavSync.backupConfig(client, cfg);
       final docDir = (await getApplicationDocumentsDirectory()).path;
       final names = WebDavSync.resultFileNames(cfg, ref.read(resultProvider).currentFile);
-      await WebDavSync.backupResults(client, docDir, names);
-    } catch (_) {
-      // 自动同步失败静默（不打扰用户，下次到点重试）。
+      await WebDavSync.backupResults(client, docDir, names,
+        localPaths: WebDavSync.resultLocalPaths(cfg, ref.read(resultProvider).currentFile, docDir));
+      if (mounted) ref.read(webDavStatusProvider.notifier).state = 'WebDAV 自动备份成功 · ${DateTime.now().toString().substring(0, 19)}';
+    } catch (e) {
+      if (mounted) {
+        final message = redactLog('WebDAV 自动备份失败：$e');
+        ref.read(webDavStatusProvider.notifier).state = message;
+        ref.read(subLoggerProvider).warning(message);
+      }
+    } finally {
+      client?.close();
+      if (mounted) ref.read(webDavBusyProvider.notifier).state = false;
     }
   }
 

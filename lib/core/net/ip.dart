@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'task_cancel.dart';
 
 /// 判断 host 是否为 IP 地址（IPv4 或 IPv6，支持方括号包裹的 IPv6）。
 bool isIp(String host) => isIpv4(host) || isIpv6(host);
@@ -233,18 +234,22 @@ Future<CfLanding?> geolocateCfIp(
   Duration? timeout,
   String? proxy,
   String traceHost = 'www.cloudflare.com',
+  TaskCancel? cancel,
 }) async {
   final t = timeout ?? const Duration(milliseconds: 2500);
   final host = isIpv6(ip) ? '[$ip]' : ip;
   final client = HttpClient()..connectionTimeout = t;
+  cancel?.check();
+  final unregister = cancel?.register(() => client.close(force: true));
   applyProxyPolicy(client, proxy);
   try {
     for (final scheme in ['http', 'https']) {
+      cancel?.check();
       try {
-        final req = await client.getUrl(Uri.parse('$scheme://$host/cdn-cgi/trace'));
+        final req = await client.getUrl(Uri.parse('$scheme://$host/cdn-cgi/trace')).timeout(t);
         req.headers.set('Host', traceHost);
         final resp = await req.close().timeout(t);
-        final body = await resp.transform(SystemEncoding().decoder).join();
+        final body = await resp.transform(SystemEncoding().decoder).join().timeout(t);
         final match = RegExp(r'colo=(\w+)').firstMatch(body);
         if (match != null) {
           final airport = match.group(1)!;
@@ -258,8 +263,10 @@ Future<CfLanding?> geolocateCfIp(
       } catch (_) {}
     }
   } finally {
+    unregister?.call();
     client.close(force: true);
   }
+  cancel?.check();
   return null;
 }
 
@@ -287,18 +294,23 @@ EgressInfo? parseEgressTrace(String body) {
 Future<EgressInfo?> probeEgress({
   Duration timeout = const Duration(seconds: 6),
   String? proxy,
+  TaskCancel? cancel,
 }) async {
   final client = HttpClient()..connectionTimeout = timeout;
+  cancel?.check();
+  final unregister = cancel?.register(() => client.close(force: true));
   applyProxyPolicy(client, proxy);
   try {
     final req =
-        await client.getUrl(Uri.parse('https://www.cloudflare.com/cdn-cgi/trace'));
+        await client.getUrl(Uri.parse('https://www.cloudflare.com/cdn-cgi/trace')).timeout(timeout);
     final resp = await req.close().timeout(timeout);
-    final body = await resp.transform(SystemEncoding().decoder).join();
+    final body = await resp.transform(SystemEncoding().decoder).join().timeout(timeout);
     return parseEgressTrace(body);
   } catch (_) {
+    cancel?.check();
     return null;
   } finally {
+    unregister?.call();
     client.close(force: true);
   }
 }
@@ -351,7 +363,7 @@ Future<Map<String, String>> geolocateCfIpBatch(
 
 /// 批量查询 IP 归属地国家码（用于非 Cloudflare 边缘的直连 IP：源站/IDC）。
 ///
-/// 对这类固定服务器 IP，出口即服务器所在地，其归属地就是真实落地国家。
+/// 归属地为数据库估计，不能证明实际网络出口或 Cloudflare POP。
 /// 走 ip-api.com 免费批量端点（POST /batch，每次最多 100 个 IP，免费版 HTTP）。
 /// [proxy] 非空时经代理请求；[timeout] 为单次批请求超时（默认 8s）。
 /// 返回 IP → 两位大写国家码 映射；查询失败或无归属地的 IP 不在结果中。
@@ -359,15 +371,19 @@ Future<Map<String, String>> geolocateIpCountryBatch(
   List<String> ips, {
   Duration? timeout,
   String? proxy,
+  TaskCancel? cancel,
 }) async {
   if (ips.isEmpty) return {};
   final t = timeout ?? const Duration(seconds: 8);
   final result = <String, String>{};
   final client = HttpClient()..connectionTimeout = t;
+  cancel?.check();
+  final unregister = cancel?.register(() => client.close(force: true));
   applyProxyPolicy(client, proxy);
   try {
     // ip-api.com 批量端点每次最多 100 个查询，超出需分块。
     for (var i = 0; i < ips.length; i += 100) {
+      cancel?.check();
       final chunk = ips.sublist(i, i + 100 > ips.length ? ips.length : i + 100);
       final payload = jsonEncode([
         for (final ip in chunk) {'query': ip, 'fields': 'status,countryCode,query'}
@@ -379,7 +395,7 @@ Future<Map<String, String>> geolocateIpCountryBatch(
         req.headers.contentType = ContentType.json;
         req.write(payload);
         final resp = await req.close().timeout(t);
-        final body = await resp.transform(utf8.decoder).join();
+        final body = await resp.transform(utf8.decoder).join().timeout(t);
         final decoded = jsonDecode(body);
         if (decoded is List) {
           for (final item in decoded) {
@@ -398,7 +414,9 @@ Future<Map<String, String>> geolocateIpCountryBatch(
       }
     }
   } finally {
+    unregister?.call();
     client.close(force: true);
   }
+  cancel?.check();
   return result;
 }

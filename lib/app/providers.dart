@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/config/app_config.dart';
 import '../core/config/config_repository.dart';
@@ -22,6 +24,8 @@ final nodeParserProvider = FutureProvider<NodeParser>((ref) async {
 /// 订阅器独立日志器（与优选执行日志互相隔离）。
 final subLoggerProvider = Provider<AppLogger>((ref) {
   final l = AppLogger();
+  getApplicationSupportDirectory().then((dir) => l.enablePersistence(Directory('${dir.path}/logs')))
+      .catchError((Object _) {});
   ref.onDispose(l.dispose);
   return l;
 });
@@ -36,6 +40,9 @@ final configProvider = FutureProvider<AppConfig>((ref) async {
 /// 同步持有最新配置（ConfigTab 每次变更立即写入，运行时从此读取，
 /// 不受 configProvider 的 Future 链和磁盘写入延迟影响）。
 final latestConfigProvider = StateProvider<AppConfig?>((ref) => null);
+final webDavBusyProvider = StateProvider<bool>((ref) => false);
+final resultBusyProvider = StateProvider<bool>((ref) => false);
+final webDavStatusProvider = StateProvider<String>((ref) => '');
 
 /// 运行时读取配置的首选方式：优先同步缓存，回退到仓库。
 Future<AppConfig> readLatestConfig(Ref ref) async {

@@ -23,17 +23,19 @@ enum ExportFormat {
   /// 纯文本 ip:port 格式（每行一个）
   plain;
 
+  bool get isTemplate => this != csv && this != plain;
+
   /// 用于 UI 显示的中文标签。
   String get label {
     switch (this) {
       case ExportFormat.csv:
         return 'CSV';
       case ExportFormat.clashYaml:
-        return 'Clash YAML';
+        return 'Clash YAML（模板）';
       case ExportFormat.v2rayJson:
-        return 'V2Ray JSON';
+        return 'V2Ray JSON（模板）';
       case ExportFormat.singboxJson:
-        return 'sing-box JSON';
+        return 'sing-box JSON（模板）';
       case ExportFormat.plain:
         return '纯文本 ip:port';
     }

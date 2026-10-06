@@ -103,7 +103,9 @@ void main() {
       final snap = snapshotLandingOutput(current, dir, '2026-09-29 20:55:01');
       expect(snap, isNotNull);
       expect(snap!.readAsStringSync(), current.readAsStringSync());
-      expect(snap.uri.pathSegments.last, 'landing_2026-09-29-20-55-01.txt');
+      expect(snap.uri.pathSegments.last, startsWith('landing_2026-09-29-20-55-01_'));
+      expect(snap.uri.pathSegments.last, endsWith('_addressesapi_top.txt'));
+      expect(File('${snap.path}.json').existsSync(), isTrue);
 
       // 结果文件不存在时不产生快照
       expect(

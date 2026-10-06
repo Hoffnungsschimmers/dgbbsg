@@ -15,6 +15,7 @@ class GithubPush {
   final String repo; // 形如 "owner/repo"
   final String branch;
   final Dio dio;
+  CancelToken? cancelToken;
 
   /// 可选：自定义请求发送器，便于测试注入假网络层。
   final Future<Response<dynamic>> Function(RequestOptions)? sender;
@@ -41,12 +42,11 @@ class GithubPush {
   /// GitHub API 走 DIRECT 直连（见构造函数），不受此影响。
   static void _applySystemProxy(Dio dio, {bool insecure = false}) {
     final proxy = readSystemProxy();
-    if (proxy == null) return;
     final adapter = dio.httpClientAdapter;
     if (adapter is IOHttpClientAdapter) {
       adapter.createHttpClient = () {
         final client = HttpClient();
-        client.findProxy = (uri) => 'PROXY $proxy';
+        client.findProxy = (uri) => proxy == null ? 'DIRECT' : 'PROXY $proxy';
         if (insecure) {
           client.badCertificateCallback = (_, _, _) => true;
         }
@@ -65,6 +65,7 @@ class GithubPush {
     this.branch = 'main',
     Dio? dio,
     this.sender,
+    this.cancelToken,
   }) : dio = dio ??
         Dio(BaseOptions(
           baseUrl: 'https://api.github.com',
@@ -104,15 +105,18 @@ class GithubPush {
       baseUrl: dio.options.baseUrl,
       headers: headers,
       data: data,
+      cancelToken: cancelToken,
       validateStatus: dio.options.validateStatus,
       connectTimeout: dio.options.connectTimeout,
       receiveTimeout: dio.options.receiveTimeout,
     );
   }
 
-  Future<Response<dynamic>> _send(RequestOptions options) => sender != null
-      ? sender!(options)
-      : dio.fetch(options);
+  Future<Response<dynamic>> _send(RequestOptions options) async {
+    final cancelled = cancelToken?.cancelError;
+    if (cancelled != null) throw cancelled;
+    return sender != null ? sender!(options) : dio.fetch(options);
+  }
 
   /// 构造 PUT body（提取已有 sha 用于更新，或仅新建）。
   static Map<String, dynamic> buildPutBody({
@@ -143,7 +147,8 @@ class GithubPush {
         throw Exception(
             'GitHub Token 无效（GitHub 返回 401）。请：① 在 GitHub 网页重新生成 Classic token 并只勾 repo；② 复制时先清空再整段粘贴 \$token，避免带入空格/换行/全角空格');
       }
-    } on DioException {
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) rethrow;
       // /user 异常也按无效处理，由下方 PUT 给出最终错误
     }
 
@@ -151,12 +156,13 @@ class GithubPush {
     final fileName = path.contains('/') || path.contains('\\')
         ? path.split(RegExp(r'[/\\]')).last
         : path;
-    final url = '/repos/$repo/contents/$fileName';
+    final url = '/repos/$repo/contents/${Uri.encodeComponent(fileName)}';
+    final readUrl = '$url?ref=${Uri.encodeQueryComponent(branch)}';
 
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
       String? sha;
       try {
-        final existing = await _send(_req('GET', url));
+        final existing = await _send(_req('GET', readUrl));
         final code = existing.statusCode ?? 0;
         if (code == 404) {
           // 文件不存在，新建
@@ -186,12 +192,19 @@ class GithubPush {
         throw Exception(
             'GitHub 401：Token 无效或无该仓库访问权。请检查：① Token 是否完整无空格/换行；② Repo 是否拼写为「owner/仓名」且 Token 有 repo 权限；③ 该仓确实存在');
       }
-      if (code == 422 && attempt < maxRetries) {
-        // SHA 冲突：远程文件被他人修改，自动重新拉取 SHA 重试
+      final responseMessage = resp.data is Map
+          ? (resp.data['message'] ?? '').toString().toLowerCase()
+          : '';
+      final isShaConflict = code == 409 ||
+          (code == 422 && (responseMessage.contains('sha does not match') ||
+              responseMessage.contains('sha must match') ||
+              responseMessage.contains("sha wasn't supplied")));
+      if (isShaConflict && attempt < maxRetries) {
+        // 冲突时重新读取目标分支 SHA，再尝试更新。
         continue;
       }
-      if (code == 422) {
-        throw Exception('GitHub 422：文件 SHA 不匹配（已重试 $maxRetries 次），远程文件可能被频繁修改');
+      if (isShaConflict) {
+        throw Exception('GitHub $code：文件发生并发更新冲突（已重试 $maxRetries 次）');
       }
       if (code < 200 || code >= 300) {
         final msg = resp.data is Map ? (resp.data['message'] ?? '') : '';
@@ -208,7 +221,7 @@ class GithubPush {
     final fileName = path.contains('/') || path.contains('\\')
         ? path.split(RegExp(r'[/\\]')).last
         : path;
-    final url = '/repos/$repo/contents/$fileName';
+    final url = '/repos/$repo/contents/$fileName?ref=${Uri.encodeQueryComponent(branch)}';
     try {
       final resp = await _send(_req('GET', url));
       final code = resp.statusCode ?? 0;
@@ -236,7 +249,7 @@ class GithubPush {
         ? path.split(RegExp(r'[/\\]')).last
         : path;
     final encoded = Uri.encodeQueryComponent(fileName);
-    final url = '/repos/$repo/commits?path=$encoded&per_page=1';
+    final url = '/repos/$repo/commits?path=$encoded&per_page=1&sha=${Uri.encodeQueryComponent(branch)}';
     try {
       final resp = await _send(_req('GET', url));
       if (resp.statusCode != 200) return null;

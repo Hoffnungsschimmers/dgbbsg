@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../storage/safe_file.dart';
 
 /// 某个 IP 一次落地检测的观测记录。
 class LandingObservation {
@@ -58,7 +59,10 @@ LandingHistory appendLandingRound(
   for (final e in results.entries) {
     final list = next.putIfAbsent(e.key, () => <LandingObservation>[]);
     final last = list.isEmpty ? null : list.first;
-    if (last != null && last.colo == e.value.colo && last.cc == e.value.cc) continue;
+    if (last != null &&
+        last.colo == e.value.colo &&
+        last.cc == e.value.cc &&
+        last.egressIp == egressIp) continue;
     list.insert(
       0,
       LandingObservation(
@@ -118,7 +122,7 @@ Future<void> recordLandingRound(
   final existing =
       historyFile.existsSync() ? parseLandingHistory(await historyFile.readAsString()) : <String, List<LandingObservation>>{};
   final next = appendLandingRound(existing, at: at, results: results, egressIp: egressIp);
-  await historyFile.writeAsString(encodeLandingHistory(next));
+  await safeWriteText(historyFile, encodeLandingHistory(next));
 }
 
 /// 写回前把当前结果文件复制成带时间戳的快照，防止「一次错误的落地覆盖毁掉好结果」。
@@ -127,10 +131,18 @@ File? snapshotLandingOutput(File current, Directory dir, String at) {
   try {
     if (!current.existsSync()) return null;
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    final ext = current.path.endsWith('.txt') ? '.txt' : '';
-    final name = 'landing_${landingStampFor(at)}$ext';
+    final base = current.uri.pathSegments.last.replaceAll(RegExp(r'[^\w.-]'), '_');
+    final name = 'landing_${landingStampFor(at).replaceAll(RegExp(r"[^\w.-]"), "-")}_${DateTime.now().microsecondsSinceEpoch}_$base';
     final dest = File('${dir.path}${Platform.pathSeparator}$name');
     current.copySync(dest.path);
+    final meta = File('${current.path}.json');
+    Map<String, dynamic> data = {};
+    try {
+      if (meta.existsSync()) data = jsonDecode(meta.readAsStringSync()) as Map<String, dynamic>;
+    } catch (_) {}
+    File('${dest.path}.json').writeAsStringSync(jsonEncode({
+      ...data, 'snapshot_target': current.absolute.path,
+    }), flush: true);
     pruneLandingSnapshots(dir);
     return dest;
   } catch (_) {
@@ -158,6 +170,8 @@ int pruneLandingSnapshots(Directory dir, {int keep = landingSnapshotKeep}) {
     for (final f in files.skip(keep)) {
       try {
         f.deleteSync();
+        final meta = File('${f.path}.json');
+        if (meta.existsSync()) meta.deleteSync();
         removed++;
       } catch (_) {
         // 单个快照删不掉不影响其余

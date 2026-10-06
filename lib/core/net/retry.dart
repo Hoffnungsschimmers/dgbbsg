@@ -13,6 +13,7 @@ Future<T> retry<T>(
   required int maxRetries,
   required Duration initialDelay,
   Future<void> Function(Duration)? sleep,
+  bool Function(Object)? shouldRetry,
   void Function(int attempt, int maxRetries, Object error, Duration delay)? onRetry,
 }) async {
   final sleeper = sleep ?? Future.delayed;
@@ -21,7 +22,7 @@ Future<T> retry<T>(
     try {
       return await body();
     } catch (e) {
-      if (attempt >= maxRetries) rethrow;
+      if (attempt >= maxRetries || (shouldRetry != null && !shouldRetry(e))) rethrow;
       var d = initialDelay * (1 << attempt);
       if (d > const Duration(seconds: 60)) d = const Duration(seconds: 60);
       onRetry?.call(attempt + 1, maxRetries, e, d);

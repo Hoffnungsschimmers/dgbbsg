@@ -45,16 +45,22 @@ Map<String, Map<String, String>> pivotByIp(List<EgressObservation> rows) {
 int countDivergentIps(Map<String, Map<String, String>> pivot) {
   var n = 0;
   for (final m in pivot.values) {
-    if (m.values.toSet().length > 1) n++;
+    final knownCountries = m.values.where((cc) => cc != '?').toSet();
+    if (knownCountries.length > 1) n++;
   }
   return n;
 }
 
-/// 渲染对照 CSV。表头固定，备注类字段不含逗号故无需转义。
+/// 渲染对照 CSV，按 RFC 4180 转义出口名等任意文本字段。
 String renderComparisonCsv(List<EgressObservation> rows) {
   final sb = StringBuffer('ip,egress,colo,country,exit_ip');
+  String field(String value) {
+    if (!value.contains(',') && !value.contains('"') &&
+        !value.contains('\n') && !value.contains('\r')) return value;
+    return '"${value.replaceAll('"', '""')}"';
+  }
   for (final r in rows) {
-    sb.write('\n${r.ip},${r.egress},${r.colo},${r.cc},${r.exitIp}');
+    sb.write('\n${[r.ip, r.egress, r.colo, r.cc, r.exitIp].map(field).join(',')}');
   }
   return sb.toString();
 }

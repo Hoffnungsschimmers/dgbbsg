@@ -43,6 +43,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
   final _wdIntervalFocus = FocusNode();
   final _webhookUrlCtl = TextEditingController();
   final _webhookUrlFocus = FocusNode();
+  final _pushMinCtl = TextEditingController();
+  final _pushMinFocus = FocusNode();
 
   Timer? _saveTimer;
   AppConfig? _pendingCfg;
@@ -98,6 +100,8 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
     _wdIntervalFocus.dispose();
     _webhookUrlCtl.dispose();
     _webhookUrlFocus.dispose();
+    _pushMinCtl.dispose();
+    _pushMinFocus.dispose();
     _saveTimer?.cancel();
     super.dispose();
   }
@@ -116,6 +120,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
 
   void _syncControllers(AppConfig cfg) {
     _isSyncing = true;
+    _syncIf(_pushMinCtl, _pushMinFocus, '${cfg.pushMinimumNodes}');
     _syncIf(_hostCtl, _hostFocus, cfg.subNodeHost);
     _syncIf(_uuidCtl, _uuidFocus, cfg.subNodeUuid);
     _syncIf(_countryCtl, _countryFocus, cfg.subDefaultCountry);
@@ -153,9 +158,13 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
       final c = _pendingCfg;
       if (c == null) return;
       _pendingCfg = null;
-      final repo = await ref.read(configRepositoryProvider.future);
-      await repo.save(c);
-      ref.invalidate(configProvider);
+      try {
+        final repo = await ref.read(configRepositoryProvider.future);
+        await repo.save(c);
+        if (mounted) ref.invalidate(configProvider);
+      } catch (e) {
+        if (mounted) AppToast.show(context, '配置保存失败：$e', success: false);
+      }
     });
   }
 
@@ -1069,7 +1078,7 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             type: MaterialType.transparency,
             child: SwitchListTile(
               title: Text('定时自动更新', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.text)),
-              subtitle: Text('按间隔自动抓取订阅', style: TextStyle(fontSize: 12, color: t.textDim)),
+              subtitle: Text('软件运行期间按间隔执行；已有任务时跳过', style: TextStyle(fontSize: 12, color: t.textDim)),
               value: cfg.subAutoUpdateEnabled,
               onChanged: (v) => _save(cfg.copyWith(subAutoUpdateEnabled: v)),
               activeThumbColor: AppTheme.edgeOrange,
@@ -1078,6 +1087,17 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
             ),
           ),
           if (cfg.subAutoUpdateEnabled) ...[
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: DropdownButtonFormField<String>(
+                initialValue: ['subscription', 'landing', 'pipeline'].contains(cfg.subAutoUpdateMode) ? cfg.subAutoUpdateMode : 'subscription',
+                decoration: const InputDecoration(labelText: '自动任务内容'),
+                items: const [
+                  DropdownMenuItem(value: 'subscription', child: Text('仅获取订阅')),
+                  DropdownMenuItem(value: 'landing', child: Text('获取订阅并检测落地')),
+                  DropdownMenuItem(value: 'pipeline', child: Text('获取、检测并推送 GitHub')),
+                ],
+                onChanged: (value) { if (value != null) _save(cfg.copyWith(subAutoUpdateMode: value)); },
+              )),
             Divider(height: 1, color: t.border),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -1087,6 +1107,31 @@ class _ConfigTabState extends ConsumerState<ConfigTab> with AutomaticKeepAliveCl
                   suffix: ' 分钟'),
             ),
           ],
+          Divider(height: 1, color: t.border),
+          Padding(padding: const EdgeInsets.all(12), child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('推送保护（自动和手动均生效）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.text)),
+              const SizedBox(height: 6),
+              Text('GeoIP 估计不计入实测。未达到门槛时保存结果并说明原因。', style: TextStyle(fontSize: 12, color: t.textDim)),
+              TextField(
+                controller: _pushMinCtl,
+                focusNode: _pushMinFocus,
+                decoration: const InputDecoration(labelText: '最少有效节点数'),
+                keyboardType: TextInputType.number,
+                onChanged: (text) {
+                  final n = int.tryParse(text);
+                  if (n != null && n > 0) _save(cfg.copyWith(pushMinimumNodes: n));
+                },
+              ),
+              labeledSliderCountUp(context, '最低 POP 实测比例',
+                cfg.pushMinimumMeasuredRatio * 100, 0, 100,
+                (v) => _save(cfg.copyWith(pushMinimumMeasuredRatio: v / 100)), suffix: '%'),
+              labeledSliderCountUp(context, '相对上次最少保留',
+                cfg.pushMinimumRetainedRatio * 100, 0, 100,
+                (v) => _save(cfg.copyWith(pushMinimumRetainedRatio: v / 100)), suffix: '%'),
+            ],
+          )),
         ],
       ),
     );

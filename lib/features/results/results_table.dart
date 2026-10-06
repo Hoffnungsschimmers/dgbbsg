@@ -233,6 +233,12 @@ class _DataRowWidgetState extends State<_DataRowWidget> {
         children: [
           // 备注 = 来源名 + 原始节点名，常超出列宽，悬停给出全文。
           annotation.isEmpty ? text : Tooltip(message: annotation, child: text),
+          const SizedBox(height: 2),
+          Tooltip(message: widget.row.evidence == 'cloudflare_trace'
+              ? '由本轮 Cloudflare trace 的 POP 映射得到国家'
+              : 'GeoIP 估计或原始标注不能证明实际 Cloudflare POP',
+            child: Text(widget.row.evidenceLabel,
+              style: TextStyle(fontSize: 10, color: t.textDim))),
         ],
       ),
     );

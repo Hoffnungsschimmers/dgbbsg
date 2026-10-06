@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart' as crypto;
 import '../config/app_config.dart';
 import '../fetch/node_parser.dart';
 import '../net/endpoint.dart';
+import '../storage/result_files.dart';
+import '../net/task_cancel.dart';
 import 'sub_parser.dart';
 
 /// edgetunnel 系订阅器要求的 User-Agent（含项目特征串），用于触发
@@ -224,7 +226,8 @@ Future<String> fetchFirstWorking(List<String> urls, SubFetcher fetch, {void Func
       }
       fallback ??= content;
     } on Exception catch (e) {
-      onLog?.call('  [回退] $u 失败：$e');
+      if (e is TaskCancelled) rethrow;
+      onLog?.call('  [回退] 请求失败（${e.runtimeType}）');
     }
   }
   return fallback ?? '';
@@ -254,8 +257,11 @@ Future<({
   required NodeParser parser,
   String? proxy,
   void Function(String)? onLog,
+  void Function(int done, int total)? onProgress,
+  TaskCancel? cancel,
 }) async {
   final tasks = collectSubscriptionTasks(config);
+  onProgress?.call(0, tasks.length);
   if (tasks.isEmpty) {
     return (
       nodes: <String>[],
@@ -273,6 +279,7 @@ Future<({
   var failedSources = 0;
 
     for (final (name, urls) in tasks) {
+      cancel?.check();
       onLog?.call('━━━ $name ━━━');
       final bodies = name == 'url'
           ? await Future.wait(urls.map((u) => fetchSingle(u, fetch, label: name)))
@@ -317,6 +324,7 @@ Future<({
         failedSourceNames.add(name);
         onLog?.call('[-] $name：所有 URL 均拉取失败或未解析出节点。');
       }
+      onProgress?.call(okSources + failedSources, tasks.length);
     }
 
   if (rawNodes.isEmpty) {
@@ -333,6 +341,7 @@ Future<({
   final resolved = <String, String?>{};
   if (config.subResolveDomain) {
     await Future.wait(hosts.map((h) async {
+      cancel?.check();
       resolved[h] = await resolve(h);
     }));
   } else {
@@ -346,6 +355,7 @@ Future<({
   // 不同端口视为不同节点保留。
   // 注释格式：`#国家码 来源名 原始节点备注`。
   final defaultCc = config.subDefaultCountry.trim().toUpperCase();
+  cancel?.check();
   final nodes = <String>[];
   final seenIpPort = <String>{};
   for (final r in rawNodes) {
@@ -388,20 +398,10 @@ Future<void> writeSubOutput(
   Map<String, Object?> extraMeta = const {},
 }) async {
   final f = File(outputFile);
-  await f.create(recursive: true);
-  final sink = f.openWrite(encoding: utf8, mode: FileMode.writeOnly);
-  for (final node in nodes) {
-    sink.write('$node\n');
-  }
-  await sink.flush();
-  await sink.close();
-
-  // 写入 .json 旁文件（生成时间 + 节点数 + 调用方附加元数据）
   final ts = DateTime.now().toString().substring(0, 19);
-  final jsonFile = File('${f.path}.json');
-  await jsonFile.writeAsString(jsonEncode({
+  await writeResultBundle(f, '${nodes.join('\n')}\n', {
     'generated_at': ts,
     'node_count': nodes.length,
     ...extraMeta,
-  }));
+  });
 }

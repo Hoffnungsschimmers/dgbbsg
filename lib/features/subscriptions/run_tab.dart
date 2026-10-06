@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 import '../../app/providers.dart';
 import '../../app/theme.dart';
@@ -25,11 +27,12 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
     await ref.read(subProvider.notifier).runSubscription();
     if (!mounted) return;
     final st = ref.read(resultProvider);
+    final run = ref.read(subProvider);
     final count = st.rows.length;
-    if (count > 0) {
+    if (run.succeeded && count > 0) {
       AppToast.show(context, '获取订阅完成：${st.sourceLabel ?? ''} 共 $count 个节点');
     } else {
-      AppToast.show(context, '获取订阅完成：未解析到节点，详见日志', success: false);
+      AppToast.show(context, run.summary, success: false);
     }
   }
 
@@ -37,6 +40,10 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
   Future<void> _runLandingAndNotify() async {
     final (ok, total) = await ref.read(subProvider.notifier).runLandingCheck();
     if (!mounted) return;
+    if (!ref.read(subProvider).succeeded) {
+      AppToast.show(context, ref.read(subProvider).summary, success: false);
+      return;
+    }
     if (total == 0) {
       AppToast.show(context, '落地检测：无可用节点，详见日志', success: false);
     } else if (ok == 0) {
@@ -62,7 +69,8 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
   Future<void> _runPipeline() async {
     await ref.read(subProvider.notifier).runPipeline();
     if (!mounted) return;
-    AppToast.show(context, '一键全流程结束，详见运行日志');
+    final run = ref.read(subProvider);
+    AppToast.show(context, run.summary, success: run.succeeded);
   }
 
   Widget _buildAutoUpdateIndicator(AppConfig cfg) {
@@ -72,7 +80,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
       child: pillWithIcon(
         context,
         icon: Icons.update,
-        text: '自动更新：每 ${cfg.subAutoUpdateIntervalMin} 分钟',
+        text: '自动更新：每 ${cfg.subAutoUpdateIntervalMin} 分钟（软件运行期间）',
         bg: AppTheme.edgeOrange.withValues(alpha: 0.12),
       ),
     );
@@ -112,19 +120,24 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          busy ? actionLabel : '就绪',
+          busy ? (run.stage.isEmpty ? actionLabel : run.stage) : '就绪',
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.text),
         ),
         const SizedBox(height: 6),
         Text(
           busy
-              ? '任务进行中，可随时停止'
+              ? (run.total > 0 ? '已处理 ${run.done}/${run.total}，可随时停止' : '任务进行中，可随时停止')
               : '先「获取订阅」生成节点，再用「测落地」识别每个 IP 的真实落地并覆盖国家码',
           style: TextStyle(fontSize: 12, color: t.textDim),
         ),
+        if (busy) ...[
+          const SizedBox(height: 6),
+          LinearProgressIndicator(value: run.total > 0 ? run.done / run.total : null),
+        ],
       ],
     );
 
+    final blocked = ref.watch(webDavBusyProvider) || ref.watch(resultBusyProvider);
     final action = busy
         ? OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
@@ -141,7 +154,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
             alignment: WrapAlignment.end,
             children: [
               OutlinedButton.icon(
-                onPressed: _runLandingAndNotify,
+                onPressed: blocked ? null : _runLandingAndNotify,
                 icon: const Tooltip(
                   message: '直连检测当前网络的真实落地。注意：开着虚拟网卡（TUN）时，'
                       '结果取决于代理客户端对这些 IP 的分流规则，详见运行日志里的出口身份。',
@@ -150,7 +163,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
                 label: const Text('测落地'),
               ),
               OutlinedButton.icon(
-                onPressed: _runPipeline,
+                onPressed: blocked ? null : _runPipeline,
                 icon: const Tooltip(
                   message: '获取订阅（走系统代理）→ 测落地（强制直连）→ 推送 GitHub，'
                       '两步出口各自钉死，中途不必开关代理',
@@ -159,7 +172,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
                 label: const Text('一键全流程'),
               ),
               OutlinedButton.icon(
-                onPressed: _runEgressCompare,
+                onPressed: blocked ? null : _runEgressCompare,
                 icon: const Tooltip(
                   message: '同一批 IP 依次经配置页「探测出口」里的各个出口做 cdn-cgi/trace，'
                       '产出 CSV 对照表并写入落地历史，用来对比 anycast IP 在不同网络下的落地差异',
@@ -168,7 +181,7 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
                 label: const Text('多出口对照'),
               ),
               FilledButton.icon(
-                onPressed: _runSubscriptionAndNotify,
+                onPressed: blocked ? null : _runSubscriptionAndNotify,
                 icon: const Icon(Icons.cloud_download_outlined, size: 18),
                 label: const Text('获取订阅'),
               ),
@@ -242,14 +255,31 @@ class _RunTabState extends ConsumerState<RunTab> with AutomaticKeepAliveClientMi
         ),
         const SizedBox(height: 8),
         if (cfgAsync.value != null) _buildAutoUpdateIndicator(cfgAsync.value!),
+        if (!run.running && run.summary.isNotEmpty)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Text(run.summary, style: TextStyle(fontSize: 12,
+              color: run.succeeded ? t.text : t.danger))),
+        if (ref.watch(webDavStatusProvider).isNotEmpty)
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Text(ref.watch(webDavStatusProvider), style: TextStyle(fontSize: 12, color: t.textDim))),
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text('运行日志',
+          child: Row(children: [Expanded(child: Text('运行日志',
               style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant))),
+            TextButton.icon(onPressed: () async {
+              try {
+                final dir = await getApplicationDocumentsDirectory();
+                final path = await subLogger.exportTo(File('${dir.path}/cfnb_log_${DateTime.now().millisecondsSinceEpoch}.log'));
+                if (context.mounted) AppToast.show(context, '脱敏日志已保存：$path');
+              } catch (e) {
+                if (context.mounted) AppToast.show(context, '导出日志失败：$e', success: false);
+              }
+            }, icon: const Icon(Icons.download, size: 16), label: const Text('导出日志')),
+          ]),
         ),
         const SizedBox(height: 6),
         // 日志区（白底）

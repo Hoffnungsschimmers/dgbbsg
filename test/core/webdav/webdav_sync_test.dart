@@ -108,19 +108,20 @@ void main() {
       );
     });
 
-    test('fullConfigJson 含敏感字段（token/webhook/webdav 密码）', () {
+    test('fullConfigJson 排除密钥和订阅鉴权', () {
       const cfg = AppConfig(
         githubToken: 'tok',
         webhookUrl: 'https://hook.test/x',
         webdavPassword: 'wd-pass',
       );
       final m = WebDavSync.fullConfigJson(cfg);
-      expect(m['GITHUB_TOKEN'], 'tok');
-      expect(m['WEBHOOK_URL'], 'https://hook.test/x');
-      expect(m['WEBDAV_PASSWORD'], 'wd-pass');
+      for (final key in ['GITHUB_TOKEN', 'WEBHOOK_URL', 'WEBDAV_PASSWORD',
+        'SUB_URLS', 'SUB_GENERATORS', 'SUB_NODE_UUID']) {
+        expect(m.containsKey(key), isFalse);
+      }
     });
 
-    test('配置备份与恢复往返（含敏感字段）', () async {
+    test('普通配置备份往返，恢复保留本机密钥', () async {
       final adapter = _MemAdapter();
       final client = _client(adapter);
       const cfg = AppConfig(
@@ -131,7 +132,10 @@ void main() {
       );
       await WebDavSync.backupConfig(client, cfg);
 
-      final restored = await WebDavSync.restoreConfig(client);
+      final restored = await WebDavSync.restoreConfig(client, current: cfg);
+      final raw = utf8.decode(adapter.files[_key(WebDavSync.configFileName)]!);
+      expect(raw, isNot(contains('secret-token')));
+      expect(raw, isNot(contains('wd-secret')));
       expect(restored.githubRepo, 'a/b');
       expect(restored.landingOutputFile, 'custom_top.txt');
       expect(restored.githubToken, 'secret-token');
@@ -153,6 +157,41 @@ void main() {
       expect(uploaded, ['a.txt']);
       expect(utf8.decode(adapter.files[_key('a.txt')]!), 'AAA');
       expect(adapter.files.containsKey(_key('missing.txt')), isFalse);
+    });
+
+    test('恢复普通配置保留本机订阅地址、鉴权和密码', () async {
+      final adapter = _MemAdapter();
+      final client = _client(adapter);
+      const original = AppConfig(subUrls: ['https://private.test/sub?token=secret'],
+        subGenerators: ['private|private.test|generator-secret'],
+        subNodeUuid: 'node-secret', githubToken: 'local-token', webdavPassword: 'local-password');
+      await WebDavSync.backupConfig(client, original.copyWith(githubBranch: 'backup-branch'));
+      final restored = await WebDavSync.restoreConfig(client, current: original);
+      expect(restored.githubBranch, 'backup-branch');
+      expect(restored.subUrls, original.subUrls);
+      expect(restored.subGenerators, original.subGenerators);
+      expect(restored.subNodeUuid, original.subNodeUuid);
+      expect(restored.githubToken, 'local-token');
+      expect(restored.webdavPassword, 'local-password');
+    });
+
+    test('绝对输出路径按配置备份，不误读文档目录同名文件', () async {
+      final adapter = _MemAdapter();
+      final client = _client(adapter);
+      final dir = await Directory.systemTemp.createTemp('cfnb_absolute_sync_');
+      addTearDown(() => dir.delete(recursive: true));
+      final actual = File('${dir.path}/custom/result.txt');
+      await actual.parent.create(recursive: true);
+      await actual.writeAsString('actual');
+      await File('${dir.path}/result.txt').writeAsString('wrong');
+      final config = AppConfig(subOutputFile: actual.path, landingOutputFile: 'other_top.txt');
+      final paths = WebDavSync.resultLocalPaths(config, actual.path, dir.path);
+      await WebDavSync.backupResults(client, dir.path, ['result.txt'], localPaths: paths);
+      expect(utf8.decode(adapter.files[_key('result.txt')]!), 'actual');
+      await actual.writeAsString('changed');
+      await WebDavSync.restoreResults(client, dir.path, ['result.txt'], localPaths: paths);
+      expect(await actual.readAsString(), 'actual');
+      expect(await File('${dir.path}/result.txt').readAsString(), 'wrong');
     });
 
     test('恢复结果：404 跳过、成功写回本地', () async {

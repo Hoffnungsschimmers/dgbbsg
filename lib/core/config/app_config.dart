@@ -33,6 +33,10 @@ class AppConfig {
   // ============ 自动更新 ============
   final bool subAutoUpdateEnabled;    // 是否启用自动更新
   final int subAutoUpdateIntervalMin; // 自动更新间隔（分钟），默认 60
+  final String subAutoUpdateMode; // subscription | landing | pipeline
+  final int pushMinimumNodes;
+  final double pushMinimumMeasuredRatio;
+  final double pushMinimumRetainedRatio;
 
   // ============ Webhook 通知 ============
   final String webhookUrl;        // Webhook URL (Telegram/Discord)
@@ -76,6 +80,10 @@ class AppConfig {
     this.githubBranch = 'main',
     this.subAutoUpdateEnabled = false,
     this.subAutoUpdateIntervalMin = 60,
+    this.subAutoUpdateMode = 'subscription',
+    this.pushMinimumNodes = 1,
+    this.pushMinimumMeasuredRatio = 0.5,
+    this.pushMinimumRetainedRatio = 0.5,
     this.webhookUrl = '',
     this.webhookType = 'none',
     this.webhookOnComplete = true,
@@ -136,6 +144,10 @@ class AppConfig {
       githubBranch: pick('GITHUB_BRANCH', 'main'),
       subAutoUpdateEnabled: pick('SUB_AUTO_UPDATE_ENABLED', false),
       subAutoUpdateIntervalMin: pick('SUB_AUTO_UPDATE_INTERVAL_MIN', 60),
+      subAutoUpdateMode: pick('SUB_AUTO_UPDATE_MODE', 'subscription'),
+      pushMinimumNodes: pick('PUSH_MINIMUM_NODES', 1),
+      pushMinimumMeasuredRatio: pick('PUSH_MINIMUM_MEASURED_RATIO', 0.5),
+      pushMinimumRetainedRatio: pick('PUSH_MINIMUM_RETAINED_RATIO', 0.5),
       webhookUrl: pick('WEBHOOK_URL', ''),
       webhookType: pick('WEBHOOK_TYPE', 'none'),
       webhookOnComplete: pick('WEBHOOK_ON_COMPLETE', true),
@@ -172,6 +184,10 @@ class AppConfig {
         'GITHUB_BRANCH': githubBranch,
         'SUB_AUTO_UPDATE_ENABLED': subAutoUpdateEnabled,
         'SUB_AUTO_UPDATE_INTERVAL_MIN': subAutoUpdateIntervalMin,
+        'SUB_AUTO_UPDATE_MODE': subAutoUpdateMode,
+        'PUSH_MINIMUM_NODES': pushMinimumNodes,
+        'PUSH_MINIMUM_MEASURED_RATIO': pushMinimumMeasuredRatio,
+        'PUSH_MINIMUM_RETAINED_RATIO': pushMinimumRetainedRatio,
         'WEBHOOK_TYPE': webhookType,
         'WEBHOOK_ON_COMPLETE': webhookOnComplete,
         'WEBHOOK_ON_ERROR': webhookOnError,
@@ -206,6 +222,10 @@ class AppConfig {
     String? githubBranch,
     bool? subAutoUpdateEnabled,
     int? subAutoUpdateIntervalMin,
+    String? subAutoUpdateMode,
+    int? pushMinimumNodes,
+    double? pushMinimumMeasuredRatio,
+    double? pushMinimumRetainedRatio,
     String? webhookUrl,
     String? webhookType,
     bool? webhookOnComplete,
@@ -241,6 +261,10 @@ class AppConfig {
       githubBranch: githubBranch ?? this.githubBranch,
       subAutoUpdateEnabled: subAutoUpdateEnabled ?? this.subAutoUpdateEnabled,
       subAutoUpdateIntervalMin: subAutoUpdateIntervalMin ?? this.subAutoUpdateIntervalMin,
+      subAutoUpdateMode: subAutoUpdateMode ?? this.subAutoUpdateMode,
+      pushMinimumNodes: pushMinimumNodes ?? this.pushMinimumNodes,
+      pushMinimumMeasuredRatio: pushMinimumMeasuredRatio ?? this.pushMinimumMeasuredRatio,
+      pushMinimumRetainedRatio: pushMinimumRetainedRatio ?? this.pushMinimumRetainedRatio,
       webhookUrl: webhookUrl ?? this.webhookUrl,
       webhookType: webhookType ?? this.webhookType,
       webhookOnComplete: webhookOnComplete ?? this.webhookOnComplete,
@@ -259,6 +283,15 @@ class AppConfig {
   /// 校验配置合法性。返回错误字符串列表，为空表示通过。
   List<String> validate() {
     final errors = <String>[];
+    if (!['subscription', 'landing', 'pipeline'].contains(subAutoUpdateMode)) {
+      errors.add('自动更新模式无效');
+    }
+    if (pushMinimumNodes < 1 || !pushMinimumMeasuredRatio.isFinite ||
+        pushMinimumMeasuredRatio < 0 || pushMinimumMeasuredRatio > 1 ||
+        !pushMinimumRetainedRatio.isFinite || pushMinimumRetainedRatio < 0 ||
+        pushMinimumRetainedRatio > 1) {
+      errors.add('推送门槛无效：节点数至少 1，比例在 0 到 1 之间');
+    }
     if (!['node', 'url', 'both'].contains(subInputMode)) {
       errors.add("SUB_INPUT_MODE 必须是 'node'、'url' 或 'both'");
     }

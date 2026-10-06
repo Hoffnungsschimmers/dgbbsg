@@ -18,6 +18,8 @@ class WebDavClient {
   final String baseUrl;
   final String user;
 
+  void close() => _dio.close(force: true);
+
   WebDavClient({
     required this.baseUrl,
     required this.user,

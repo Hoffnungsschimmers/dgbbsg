@@ -18,7 +18,7 @@ void main() {
 
     final tip = find.descendant(
       of: find.byType(ResultTable),
-      matching: find.byType(Tooltip),
+      matching: find.byWidgetPredicate((w) => w is Tooltip && w.message == remark),
     );
     expect(tip, findsOneWidget);
     expect(tester.widget<Tooltip>(tip).message, remark);

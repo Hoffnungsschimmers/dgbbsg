@@ -1,4 +1,3 @@
-import 'package:cfnb_app/core/net/endpoint.dart';
 import 'package:cfnb_app/features/results/result_state.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -57,26 +56,4 @@ void main() {
     });
   });
 
-  group('filterByCountries / countFacets', () {
-    final rows = [
-      ResultRow('1.1.1.1:443#US CM 洛杉矶 01'),
-      ResultRow('2.2.2.2:443#JP 洛璃 东京 02'),
-      ResultRow('3.3.3.3:443#US CM 圣何塞 03'),
-    ];
-
-    test('集合为空时原样返回', () {
-      expect(filterByCountries(rows), rows);
-    });
-    test('按国家码筛选', () {
-      expect(filterByCountries(rows, countries: {'US'}).map((e) => e.ipPort),
-          ['1.1.1.1:443', '3.3.3.3:443']);
-      expect(filterByCountries(rows, countries: {'US', 'JP'}).length, 3);
-      expect(filterByCountries(rows, countries: {'XX'}), isEmpty);
-    });
-    test('countFacets 统计行数并保持首次出现顺序', () {
-      final facets = countFacets(rows.map((r) => nodeCountry(r.node)));
-      expect(facets.keys.toList(), ['US', 'JP']);
-      expect(facets, {'US': 2, 'JP': 1});
-    });
-  });
 }

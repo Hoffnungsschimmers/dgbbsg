@@ -346,7 +346,7 @@ void main() {
               githubBranch: 'main',
             )),
         resultProvider.overrideWith((ref) => ResultNotifier()
-          ..setRows([ResultRow('1.2.3.4:443#US mia', '50.00 ms')], 'addressesapi.txt')),
+          ..setRows([ResultRow('1.2.3.4:443#US mia', '50.00 ms', 'cloudflare_trace')], 'addressesapi.txt')),
         githubPushProvider.overrideWith((ref) => (cfg) => GithubPush(
               token: cfg.githubToken,
               repo: cfg.githubRepo,
@@ -362,7 +362,7 @@ void main() {
 
       expect(apiCalls, containsAll([
         'GET /user',
-        'GET /repos/Hoffnungsschimmers/mnscn/contents/addressesapi.txt',
+        'GET /repos/Hoffnungsschimmers/mnscn/contents/addressesapi.txt?ref=main',
         'PUT /repos/Hoffnungsschimmers/mnscn/contents/addressesapi.txt',
       ]));
       expect(find.textContaining('推送成功'), findsOneWidget);

@@ -9,6 +9,8 @@ import '../../core/config/app_config.dart';
 import '../../core/webdav/webdav_client.dart';
 import '../../core/webdav/webdav_sync.dart';
 import '../results/result_state.dart';
+import '../subscriptions/subscriptions_state.dart';
+import '../../core/logging/app_logger.dart';
 
 /// 顶栏 WebDAV 同步入口：弹出「同步配置 / 同步结果」两个选项，
 /// 各自可推送备份或拉取恢复。
@@ -20,6 +22,10 @@ Future<void> showWebDavSyncSheet(
   WebDavClient Function(AppConfig)? clientBuilder,
 }) async {
   final cfg = ref.read(latestConfigProvider);
+  if (ref.read(webDavBusyProvider) || ref.read(subProvider).running) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已有任务运行中，请完成后再同步')));
+    return;
+  }
   if (cfg == null || cfg.webdavUrl.trim().isEmpty || cfg.webdavUser.trim().isEmpty) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('请先在「配置」页填写 WebDAV 服务器地址与账号')),
@@ -58,12 +64,14 @@ Future<void> showWebDavSyncSheet(
             ],
           ),
           const SizedBox(height: 8),
+          if (ref.read(webDavStatusProvider).isNotEmpty)
+            Padding(padding: const EdgeInsets.all(12), child: Text(ref.read(webDavStatusProvider))),
           ListTile(
             leading: Icon(Icons.settings_outlined,
                 color: AppTheme.edgeOrange),
             title: Text('同步配置',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: t.text)),
-            subtitle: Text('备份 / 恢复 cfnb_config.json',
+            subtitle: Text('备份普通配置；密钥和订阅地址保留在本机',
                 style: TextStyle(fontSize: 12, color: t.textDim)),
             onTap: () => Navigator.pop(ctx, 'config'),
           ),
@@ -125,6 +133,9 @@ Future<void> _runSync(
   bool isConfig,
   bool isPush,
 ) async {
+  if (ref.read(webDavBusyProvider) || ref.read(subProvider).running) return;
+  ref.read(webDavBusyProvider.notifier).state = true;
+  ref.read(webDavStatusProvider.notifier).state = 'WebDAV 同步中…';
   final messenger = ScaffoldMessenger.of(context);
   final navigator = Navigator.of(context, rootNavigator: true);
   showDialog<void>(
@@ -142,16 +153,18 @@ Future<void> _runSync(
   );
 
   String message;
+  WebDavClient? client;
   try {
-    final client = buildClient(cfg);
+    client = buildClient(cfg);
     if (isConfig) {
       if (isPush) {
         await WebDavSync.backupConfig(client, cfg);
         message = '配置已备份到 WebDAV';
       } else {
-        final restored = await WebDavSync.restoreConfig(client);
+        final restored = await WebDavSync.restoreConfig(client, current: cfg);
         final repo = await ref.read(configRepositoryProvider.future);
         await repo.save(restored);
+        ref.read(latestConfigProvider.notifier).state = restored;
         ref.invalidate(configProvider);
         message = '配置已从 WebDAV 恢复';
       }
@@ -159,11 +172,12 @@ Future<void> _runSync(
       final docDir = (await getApplicationDocumentsDirectory()).path;
       final currentFile = ref.read(resultProvider).currentFile;
       final names = WebDavSync.resultFileNames(cfg, currentFile);
+      final paths = WebDavSync.resultLocalPaths(cfg, currentFile, docDir);
       if (isPush) {
-        final uploaded = await WebDavSync.backupResults(client, docDir, names);
+        final uploaded = await WebDavSync.backupResults(client, docDir, names, localPaths: paths);
         message = '已备份 ${uploaded.length} 个结果文件';
       } else {
-        final restored = await WebDavSync.restoreResults(client, docDir, names);
+        final restored = await WebDavSync.restoreResults(client, docDir, names, localPaths: paths);
         if (restored.isNotEmpty) {
           ref.read(resultProvider.notifier).refreshFile(cfg.subOutputFile);
         }
@@ -180,9 +194,13 @@ Future<void> _runSync(
       _ => '同步失败：服务器返回 HTTP $code',
     };
   } catch (e) {
-    message = '同步失败：$e';
+    message = redactLog('同步失败：$e');
+  } finally {
+    client?.close();
+    if (context.mounted) ref.read(webDavBusyProvider.notifier).state = false;
   }
 
   if (navigator.mounted) navigator.pop();
+  if (context.mounted) ref.read(webDavStatusProvider.notifier).state = '$message · ${DateTime.now().toString().substring(0, 19)}';
   messenger.showSnackBar(SnackBar(content: Text(message)));
 }

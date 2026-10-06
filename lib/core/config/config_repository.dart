@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -13,6 +14,7 @@ class ConfigRepository {
   AppConfig _config;
   final SharedPreferences _prefs;
   final SecureKV _secure;
+  Future<void>? _saveQueue;
 
   ConfigRepository._(this._config, this._prefs, this._secure);
 
@@ -27,9 +29,15 @@ class ConfigRepository {
     final prefs = await SharedPreferences.getInstance();
     final secureKv = secure ?? const SecureStorageKv();
     final jsonStr = prefs.getString(_kConfigJson);
-    final Map<String, dynamic> data = jsonStr != null
-        ? (jsonDecode(jsonStr) as Map<String, dynamic>)
-        : <String, dynamic>{};
+    Map<String, dynamic> data = {};
+    if (jsonStr != null) {
+      try {
+        data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      } catch (_) {
+        // Retain the damaged payload for recovery; do not block startup.
+        await prefs.setString('app_config_corrupt_backup', jsonStr);
+      }
+    }
     var config = data.isNotEmpty ? AppConfig.fromJson(data) : const AppConfig();
     var dirty = false;
     final storedVersion = prefs.getInt(_kSchemaVersion) ?? 0;
@@ -89,6 +97,19 @@ class ConfigRepository {
   /// 持久化：密钥写安全存储，其余写 SharedPreferences 并更新内存。
   Future<void> save(AppConfig config) async {
     _config = config;
+    final previous = _saveQueue;
+    final done = Completer<void>();
+    _saveQueue = done.future;
+    try {
+      if (previous != null) await previous;
+      await _persist(config);
+    } finally {
+      done.complete();
+      if (identical(_saveQueue, done.future)) _saveQueue = null;
+    }
+  }
+
+  Future<void> _persist(AppConfig config) async {
     if (config.githubToken.isNotEmpty) {
       await _secure.write(_kGithubToken, config.githubToken);
     } else {

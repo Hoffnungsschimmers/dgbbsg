@@ -13,6 +13,7 @@ import 'motion.dart';
 import 'providers.dart';
 import 'shortcuts.dart';
 import 'theme.dart';
+import 'version.dart';
 
 final tabProvider = StateProvider<int>((ref) => 0);
 
@@ -55,7 +56,7 @@ class AppShell extends ConsumerWidget {
           ),
           const SizedBox(width: 10),
           const Flexible(
-            child: Text('CF优选',
+            child: Text('CF优选 $appVersion',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 19),
                 overflow: TextOverflow.ellipsis),
           ),

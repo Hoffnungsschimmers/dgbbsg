@@ -15,9 +15,9 @@ void main() {
   group('ExportFormat', () {
     test('label 返回正确的中文标签', () {
       expect(ExportFormat.csv.label, 'CSV');
-      expect(ExportFormat.clashYaml.label, 'Clash YAML');
-      expect(ExportFormat.v2rayJson.label, 'V2Ray JSON');
-      expect(ExportFormat.singboxJson.label, 'sing-box JSON');
+      expect(ExportFormat.clashYaml.label, 'Clash YAML（模板）');
+      expect(ExportFormat.v2rayJson.label, 'V2Ray JSON（模板）');
+      expect(ExportFormat.singboxJson.label, 'sing-box JSON（模板）');
       expect(ExportFormat.plain.label, '纯文本 ip:port');
     });
   });

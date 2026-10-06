@@ -5,6 +5,14 @@ import 'package:dio/dio.dart' as dio_pkg;
 import '../subscription/subscription_converter.dart' show edgetunnelUa;
 import 'retry.dart';
 
+/// 日志只显示订阅服务的 origin，路径、查询参数和片段都可能携带凭据。
+String subscriptionUrlForLog(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !uri.hasAuthority) return '<订阅 URL 已隐藏>';
+  final port = uri.hasPort ? ':${uri.port}' : '';
+  return '${uri.scheme}://${uri.host}$port/<路径与参数已隐藏>';
+}
+
 /// 走 Dio 带 cfg 化超时与指数退避重试的 HTTP GET，返回 body 明文。
 ///
 /// 成功响应 (status 200-299) 直接返回 `.data.toString()`；其它状态码被 Dio
@@ -25,10 +33,12 @@ Future<String> fetchHttpWithRetry({
   required int retryDelayMs,
   Future<void> Function(Duration)? sleep,
   void Function(String)? onLog,
+  dio_pkg.CancelToken? cancelToken,
 }) async {
   Future<String> doGet() async {
     final resp = await dio.get<String>(
       url,
+      cancelToken: cancelToken,
       options: dio_pkg.Options(
         responseType: dio_pkg.ResponseType.plain,
         headers: const {
@@ -49,6 +59,8 @@ Future<String> fetchHttpWithRetry({
     maxRetries: retries,
     initialDelay: Duration(milliseconds: retryDelayMs),
     sleep: sleep,
+    shouldRetry: (e) => !(e is dio_pkg.DioException && dio_pkg.CancelToken.isCancel(e)) &&
+        !(cancelToken?.isCancelled ?? false),
     onRetry: retries > 0
         ? (attempt, max, error, delay) {
             onLog?.call('  ↻ 重试 $attempt/$max（${classifyFetchError(error, url)}，'
@@ -60,6 +72,8 @@ Future<String> fetchHttpWithRetry({
 
 /// 把抓取异常分类为可读提示（供日志/排障）。纯函数。
 String classifyFetchError(Object e, String url) {
+  final parsedUrl = Uri.tryParse(url);
+  final isEdgeTunnelSub = parsedUrl?.path.contains('/sub') ?? false;
   if (e is dio_pkg.DioException) {
     final t = e.type;
     if (t == dio_pkg.DioExceptionType.connectionTimeout ||
@@ -71,7 +85,7 @@ String classifyFetchError(Object e, String url) {
     }
     if (t == dio_pkg.DioExceptionType.badResponse) {
       final code = e.response?.statusCode;
-      final hint = (code == 403 && url.contains('/sub'))
+      final hint = (code == 403 && isEdgeTunnelSub)
           ? '（该 edgetunnel 部署可能未启用 BEST_SUB：请在 Cloudflare 变量设置 BEST_SUB=1）'
           : '';
       return 'HTTP ${code ?? '?'} 错误$hint';
@@ -94,7 +108,7 @@ String classifyFetchError(Object e, String url) {
     if (inner is SocketException) {
       return '网络连接失败：${inner.message}';
     }
-    return '请求异常：${e.message ?? e}';
+    return '请求异常（${t.name}）';
   }
   return '未知错误：$e';
 }
