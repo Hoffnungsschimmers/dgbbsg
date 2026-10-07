@@ -5,8 +5,8 @@
 > 逐轮验收记录见 `docs/IMPLEMENTATION_*.md`，后续规划见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 > 历史沿革与旧工作区快照已移至 [`docs/archive/PROJECT_HISTORY.md`](docs/archive/PROJECT_HISTORY.md)。
 >
-> **当前状态（2026-10-06 实测）**：版本 `1.1.0+2`；`flutter test` **348/348 全绿**（38 个测试文件）；
-> `flutter analyze --no-fatal-infos` **0 error / 0 warning / 204 info**，退出码 0。
+> **当前状态（2026-10-07 实测）**：版本 `1.1.0+2`；`flutter test` **351/351 全绿**（39 个测试文件）；
+> `flutter analyze --no-fatal-infos` **0 error / 0 warning / 201 info**，退出码 0。
 > 产品范围为三步：**获取订阅 → 落地检测 → 推送**（延迟优选 TCP 测速已于 2026-09-20 按用户决定彻底移除）。
 > 落地检测**只走直连**并记录出口身份；结果页的分类芯片与分组视图已移除，保留搜索、排序、行编辑与整段原始内容编辑。
 
@@ -40,8 +40,8 @@
 
 ```powershell
 flutter pub get
-flutter analyze --no-fatal-infos   # 基线：0 error / 0 warning（204 条 info 属正常，CI 同样容忍 info）
-flutter test                       # 基线：348/348 通过（2026-10-06 实测）
+flutter analyze --no-fatal-infos   # 基线：0 error / 0 warning（201 条 info 属正常，CI 同样容忍 info）
+flutter test                       # 基线：351/351 通过（2026-10-07 实测）
 flutter build windows --release
 # 产物：build/windows/x64/runner/Release/cfnb_app.exe
 # 注意：Windows 构建需要 MSVC 工具链（Visual Studio 2022 的「C++ 桌面负载」+ ATL 组件），
@@ -163,7 +163,7 @@ lib/
                                 （`%USERPROFILE%\Documents\addressesapi.txt` /
                                  `..._top.txt` + 同名 `.json` 旁文件 + 同级 `history/` 快照）
 
-test/                        38 个测试文件、348 个用例（app/core/features 分层；
+test/                        39 个测试文件、351 个用例（app/core/features 分层；
                              helpers/temp_dir.dart 是用例临时目录清理工具，非用例）
 docs/                        RELEASE_NOTES / ROADMAP / IMPLEMENTATION_*（逐轮验收）/
                              archive（历史沿革）/ superpowers（2026-07~08 历史计划与 spec）
@@ -240,7 +240,7 @@ assets/                      country_codes.json（国家码映射数据）、图
 
 ## 8. 测试
 
-- 38 个测试文件，**348 个用例全绿**（基线：`flutter test` 348/348；`flutter analyze --no-fatal-infos` 0 error / 0 warning、204 条 info；均为 2026-10-06 实测）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
+- 39 个测试文件，**351 个用例全绿**（基线：`flutter test` 351/351；`flutter analyze --no-fatal-infos` 0 error / 0 warning、201 条 info；均为 2026-10-07 实测）。覆盖 `core/` 全部模块与主要 feature 状态逻辑（Riverpod ProviderScope 单测，网络/存储均注入 fake）。
 - 关键测试语义：订阅转换去重只按 ip:port（`subscription_converter_test.dart`）、**注释保留原始节点备注 + 端到端「获取→写文件→落地检测→结果页解析」不丢备注**（同文件的「输出链路」组）、标签拆分为国家码+备注（`node_parser_test.dart` 的 `splitLabel`/`parseTextNodesWithRemark`）、节点行解析与落地覆盖语义（`endpoint_test.dart`，自 latency_test 迁移）、旧配置键迁移（`app_config_test.dart` 的 `SUB_LATENCY_OUTPUT_FILE` 兜底，以及 `githubRepo` 缺键兜底必须等于构造函数默认）、**配置页在配置先解析完成时也要回填**（`config_backfill_test.dart` 第二个用例）、长备注渲染不溢出（`results_table_annotation_test.dart`）、**标签剥离规则本身有直测**（`config_entries_test.dart`：备注自身含 `://`、`|` 之后为空、节点链接不拼备注、拆拼往返不变形）。
 - 可靠性与数据安全：`core/reliability_test.dart`（写临时文件-替换-恢复、内容哈希与旁文件错配拒绝、GeoIP 过期、脱敏）、`features/subscriptions/pipeline_reliability_test.dart`（固定本轮配置、检测中取消、动作互斥、数量骤减拦截、0 节点不写回）、`features/subscriptions/pipeline_test.dart`（一键全流程编排，须用 `SharedPreferences.setMockInitialValues` 种配置，见 §10）、`features/results/result_editing_test.dart`（行编辑/整段原始文本校验/撤销重做/未保存守卫/串行保存）。
 - 结果行解析保留对旧格式（行尾延迟字符串）的容错：历史生成的文件仍能正确解析出节点/国家码/来源。延迟片段**只认行尾形态**（`50.00 ms` / `56.00ms`），行中出现而后面还有文字的当作备注原文，避免整段被吞。
@@ -288,7 +288,9 @@ assets/                      country_codes.json（国家码映射数据）、图
 - **仓库正文是 LF，脚本改文件必须用二进制模式**：`core.autocrlf=false` 且没有 `.gitattributes`，git 不做行尾转换。用 Python 文本模式 `open(path,'w')` 重写会把文件整份换成 CRLF，一次提交能产生 4047 增 / 4047 删的整文件 diff，把真实改动全埋掉。判据：`git diff --ignore-cr-at-eol --stat` 输出为空 → 纯行尾噪音。改文件优先用编辑工具，必须脚本化时走 `open(path,'wb')`。
 - **行尾噪音两个方向都要查**：漏网的不止 CRLF 写回，还有整仓里唯一存成 `i/crlf` 的文件被工具顺手降为 LF——同样表现为整文件 diff（2026-10-06 的 `subscription_converter_test.dart`，`c417a28` 统一行尾时漏掉它）。判据是 `git ls-files --eol`（列 1 是 index、列 2 是工作区），别只看 `git diff --stat`。
 - **批量改文件不要用拼出来的 sed/awk**：本轮用变量转义锚点的 `sed -i` 批量插 import，正则被转义搞坏成「匹配几乎所有行」，把 import 插进了类体；`git restore` 回到刚提交的 HEAD 再逐个用编辑工具改，代价更低。规则：改完立刻 `git diff --numstat` 核对行数是否符合预期（改 5 个文件应是十几行，出现 344/343 就是坏了）。
-- **Windows 全量跑会偶发临时目录删除失败，别当成用例回归**：tearDown 里 `dir.delete(recursive: true)` 撞上杀软/索引仍持有的句柄会抛 `PathAccessException errno=32`，并行全量跑偶发红一条、单跑恒过。清理临时目录不是被测行为，`test/helpers/temp_dir.dart` 的 `removeTempDir` 重试 10 次后放弃。**只在普通 `test()` 用**：`testWidgets` 的 fake async 区里 `Future.delayed` 要靠 `pump` 才走，加进去直接超时。
+- **`.animate()` 会吃掉列表项的 key**：`flutter_animate` 的 `.animate().fadeIn().slideX()` 返回的是没有 key 的 `Animate` widget，key 挂在被包裹的内层 widget 上时 `ReorderableListView` 认不出来，build 阶段直接抛「Every item of ReorderableListView must have a key」，整行操作列渲染不出来（2026-10-07 修，`results_table._dataRow` 改用 `KeyedSubtree` 把 key 提到动画链外层）。判据：加/改拖拽排序列表后，务必有一条**进入编辑模式并点行**的 widget 用例——notifier 级用例测不出这种接线崩。
+- **widget 用例里两个必踩的点**：① 会写真实文件的交互要包在 `tester.runAsync` 里，fake-async 区不会推进 IO 的 Future（表现为 `saving` 永远 true）；② `AppToast` 是挂在 Overlay 上的 3 秒 Timer，不先 `tester.pump(Duration(seconds: 4))` 把假时钟推过去，它会挡住工具栏，下一次 `tap` 落空还只报「found 0 widgets」。
+- **Windows 全量跑会偶发临时目录删除失败，别当成用例回归**：tearDown 里 `dir.delete(recursive: true)` 撞上杀软/索引仍持有的句柄会抛 `PathAccessException errno=32`，并行全量跑偶发红一条、单跑恒过。清理临时目录不是被测行为，`test/helpers/temp_dir.dart` 的 `removeTempDir` 重试 10 次后放弃。
 - **沟通语言**：简体中文，先结论后细节。
 - 提交/改代码前先跑 `flutter test` + `flutter analyze`（全仓零 error/warning）验证。
 
