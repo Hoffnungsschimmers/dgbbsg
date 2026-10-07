@@ -151,6 +151,9 @@ lib/
 │   │   │                            行编辑与整段原始内容编辑、撤销/重做（30 步）、未保存守卫、
 │   │   │                            IP 数量统计、导出、推送门槛拦截、落地历史面板、
 │   │   │                            快照恢复、地址选择器
+│   │   │   ├── result_edit_dialog.dart   编辑节点弹窗（IP:端口 + 来源，国家码沿用原行）
+│   │   │   ├── result_raw_view.dart      「原始内容」可编辑视图（控制器仍归调用方）
+│   │   │   └── landing_history_dialog.dart 落地历史面板（IP → 历次落地与出口）
 │   ├── github_sync/                 同步页：远端 *_top.txt 拉取比对、双向推送、节点增删改
 │   ├── webdav/webdav_sync_panel.dart    WebDAV 同步底部面板（AppBar 云图标入口）
 │   ├── onboarding/onboarding_wizard.dart  首启 4 步引导（欢迎/输入模式/GitHub/完成）
@@ -258,7 +261,12 @@ assets/                      country_codes.json（国家码映射数据）、图
 3. 分支拓扑待归一：本地 `main`（`8723274`）与 `push-clean` **无共同祖先**（不同血脉），另有
    `refactor/hardening`、`feat/subscription-latency-ux`、`wip/ui-on-main-backup` 三个陈旧分支。
    删分支/重置 main 属高危且不可逆，**未获得用户确认前不动**。
-4. 巨文件：`results_tab.dart` 1309 行、`config_tab.dart` 1069 行（2026-10-06 已拆出 `config_entries.dart` 纯解析与 `config_item_widgets.dart` 条目控件；剩余区块与 `_save`/控制器回填强耦合，硬拆会碰 §10 的 `ref.listenManual` 坑）、`subscriptions_state.dart` 964 行。
+4. 巨文件（2026-10-06 拆分后）：`config_tab.dart` 1069 行（拆出 `config_entries.dart` + `config_item_widgets.dart`）、
+   `results_tab.dart` 1032 行（拆出 `result_edit_dialog.dart` + `result_raw_view.dart` + `landing_history_dialog.dart`）、
+   `subscriptions_state.dart` 964 行**未拆**——它是单一编排类，`_begin`/`_progress`/`_finish`/`cancel`
+   与流水线互斥、固定本轮配置、取消语义互相咬合，跨文件拆只会把耦合改成一大串参数，风险大于收益。
+   两个已拆文件剩下的部分同理：`_compactTextField`、各区块与 `_save`/控制器回填同生命周期，
+   硬拆会碰本节上面的 `ref.listenManual` 坑。
 5. 配置页与订阅转换各有一份「备注|URL」标签剥离实现（`config_entries.dart` 与 `subscription_converter.fetchSingle`），规则相同但代码未合并——合并会动到抓取主路径，需单独一轮带测试的改动。
 6. 非 CF IP 的归属地兜底仍是**单源** `http://ip-api.com/batch`（明文 HTTP、45 req/min、每次最多 100 条），无备用源；缓存 7 天过期（`geo_cache.dart`）。
 

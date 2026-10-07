@@ -10,14 +10,15 @@ import '../../app/motion.dart';
 import '../../app/theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/export/result_exporter.dart';
-import '../../core/net/endpoint.dart';
-import '../../core/net/landing_history.dart';
 import '../../core/storage/result_files.dart';
 import '../subscriptions/subscriptions_state.dart';
 import '../widgets/common.dart';
 import '../../app/providers.dart';
 import 'result_state.dart';
 import 'results_table.dart';
+import 'landing_history_dialog.dart';
+import 'result_edit_dialog.dart';
+import 'result_raw_view.dart';
 
 class ResultsTab extends ConsumerStatefulWidget {
   const ResultsTab({super.key});
@@ -245,84 +246,7 @@ class _ResultsTabState extends ConsumerState<ResultsTab>
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (ctx) => _LandingHistoryDialog(history: history),
-    );
-  }
-
-  void _showEditDialog(int originalIndex, ResultRow row) {
-    final ipPortCtl = TextEditingController(text: row.ipPort);
-    final sourceCtl = TextEditingController(text: row.source);
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('编辑节点'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ipPortCtl,
-                style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
-                decoration: InputDecoration(
-                  labelText: 'IP:端口',
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: sourceCtl,
-                style: const TextStyle(fontFamily: 'AppMono', fontSize: 14),
-                decoration: InputDecoration(
-                  labelText: '来源',
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final ipPort = ipPortCtl.text.trim();
-                final source = sourceCtl.text.trim();
-                if (ipPort.isNotEmpty) {
-                  final cc = nodeCountry(row.node);
-                  final ccPart = cc.isNotEmpty ? '#$cc' : '';
-                  final srcPart = source.isNotEmpty ? ' $source' : '';
-                  final newNode = '$ipPort$ccPart$srcPart';
-                  if (!validResultNode(newNode)) {
-                    AppToast.show(ctx, '请输入有效的地址:端口', success: false);
-                    return;
-                  }
-                  try {
-                    ref
-                        .read(resultProvider.notifier)
-                        .updateRow(originalIndex, newNode);
-                  } on FormatException catch (e) {
-                    AppToast.show(ctx, e.message, success: false);
-                    return;
-                  }
-                  _saveEdits();
-                }
-                Navigator.pop(ctx);
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
+      builder: (ctx) => LandingHistoryDialog(history: history),
     );
   }
 
@@ -778,87 +702,12 @@ class _ResultsTabState extends ConsumerState<ResultsTab>
                       )
                     // ── 原始内容视图（可编辑）──
                     else if (_rawView)
-                      card(
-                        context,
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(
-                                  Icons.edit_note,
-                                  size: 16,
-                                  color: t.textDim,
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    '编辑原始内容（修改后切回解析视图自动保存）',
-                                    style: TextStyle(
-                                      color: t.textDim,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                                TextButton.icon(
-                                  icon: const Icon(Icons.copy, size: 16),
-                                  label: const Text(
-                                    '全部复制',
-                                    style: TextStyle(fontSize: 13),
-                                  ),
-                                  onPressed: _rawTextCtrl.text.isEmpty
-                                      ? null
-                                      : () {
-                                          Clipboard.setData(
-                                            ClipboardData(
-                                              text: _rawTextCtrl.text,
-                                            ),
-                                          );
-                                          AppToast.show(context, '已复制全部内容');
-                                        },
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxHeight:
-                                    MediaQuery.of(context).size.height * 0.5,
-                                minHeight: 200,
-                              ),
-                              child: TextField(
-                                controller: _rawTextCtrl,
-                                onChanged: (_) {
-                                  setState(() {});
-                                  _updateEditBusy();
-                                },
-                                maxLines: null,
-                                expands: true,
-                                style: const TextStyle(
-                                  fontFamily: 'AppMono',
-                                  fontSize: 13,
-                                  height: 1.5,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText:
-                                      '每行一个节点，如：\n1.2.3.4:443#精品v4 1\n[2606:4700:52::1]:443#精品v6 1',
-                                  hintStyle: TextStyle(
-                                    color: t.textDim.withValues(alpha: 0.5),
-                                    fontSize: 13,
-                                  ),
-                                  isDense: true,
-                                  contentPadding: const EdgeInsets.all(12),
-                                  border: OutlineInputBorder(
-                                    borderRadius: t.radius,
-                                  ),
-                                  filled: true,
-                                  fillColor: t.surface,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      ResultRawView(
+                        controller: _rawTextCtrl,
+                        onChanged: () {
+                          setState(() {});
+                          _updateEditBusy();
+                        },
                       )
                     // ── 解析视图 ──
                     else ...[
@@ -896,9 +745,12 @@ class _ResultsTabState extends ConsumerState<ResultsTab>
                                 });
                               },
                         onEdit: (i) {
-                          _showEditDialog(
-                            rows.indexOf(sortedRows[i]),
-                            sortedRows[i],
+                          showResultEditDialog(
+                            ref,
+                            context,
+                            originalIndex: rows.indexOf(sortedRows[i]),
+                            row: sortedRows[i],
+                            save: _saveEdits,
                           );
                         },
                         onDelete: (i) async {
@@ -1178,132 +1030,3 @@ class _ResultsTabState extends ConsumerState<ResultsTab>
   }
 }
 
-/// 落地历史面板：按 IP 展开查看历次实测落地（时间 / 机场码或归属地 / 国家码 / 当时的出口）。
-/// 用途：同一个 Cloudflare anycast IP 在不同网络下会落到不同 POP，这里留下的正是
-/// 「哪一次测量、走哪个出口、得到什么落地」的对照记录。
-class _LandingHistoryDialog extends StatefulWidget {
-  const _LandingHistoryDialog({required this.history});
-
-  final LandingHistory history;
-
-  @override
-  State<_LandingHistoryDialog> createState() => _LandingHistoryDialogState();
-}
-
-class _LandingHistoryDialogState extends State<_LandingHistoryDialog> {
-  final _queryCtl = TextEditingController();
-
-  @override
-  void dispose() {
-    _queryCtl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = AppThemeExt.of(context);
-    final q = _queryCtl.text.trim().toLowerCase();
-    final ips =
-        widget.history.keys
-            .where((ip) => q.isEmpty || ip.toLowerCase().contains(q))
-            .toList()
-          ..sort();
-    final width = (MediaQuery.sizeOf(context).width * 0.86).clamp(280.0, 560.0);
-
-    return AlertDialog(
-      title: const Text('落地历史'),
-      content: SizedBox(
-        width: width,
-        height: 420,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _queryCtl,
-              style: const TextStyle(fontFamily: 'AppMono', fontSize: 13),
-              decoration: InputDecoration(
-                hintText: '搜索 IP…',
-                hintStyle: TextStyle(color: t.textDim, fontSize: 13),
-                prefixIcon: const Icon(Icons.search, size: 18),
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                border: OutlineInputBorder(borderRadius: t.radius),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: ips.isEmpty
-                  ? Center(
-                      child: Text(
-                        widget.history.isEmpty
-                            ? '还没有落地记录：先在运行页点「测落地」。'
-                            : '没有匹配的 IP。',
-                        style: TextStyle(color: t.textDim, fontSize: 13),
-                      ),
-                    )
-                  : ListView(
-                      children: [
-                        for (final ip in ips)
-                          ExpansionTile(
-                            dense: true,
-                            tilePadding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                            ),
-                            title: Text(
-                              ip,
-                              style: const TextStyle(
-                                fontFamily: 'AppMono',
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            subtitle: Text(
-                              '当前 ${widget.history[ip]!.first.cc}'
-                              ' · 记录了 ${widget.history[ip]!.length} 次变化',
-                              style: TextStyle(fontSize: 11, color: t.textDim),
-                            ),
-                            children: [
-                              for (final o in widget.history[ip]!)
-                                ListTile(
-                                  dense: true,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                  ),
-                                  title: Text(
-                                    '${o.at}   ${o.colo.isEmpty ? '归属地' : o.colo} → ${o.cc}',
-                                    style: const TextStyle(
-                                      fontFamily: 'AppMono',
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  subtitle: o.egressIp.isEmpty
-                                      ? null
-                                      : Text(
-                                          '出口 ${o.egressIp}',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: t.textDim,
-                                          ),
-                                        ),
-                                ),
-                            ],
-                          ),
-                      ],
-                    ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
-    );
-  }
-}

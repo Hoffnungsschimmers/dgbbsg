@@ -1,7 +1,7 @@
 # 2026-10-06 整理轮记录
 
 本轮范围：把「全面了解并整理项目」落到仓库里——补记未归档的一轮开发、提交长期悬空的工作区、
-清掉根目录产物、文档收敛为两份、拆分最大的 UI 文件。**没有新增产品功能**。
+清掉根目录产物、文档收敛为两份、拆分最大的 UI 文件、按当前代码重新出包。**没有新增产品功能**。
 
 ## 做了什么
 
@@ -15,27 +15,34 @@
   原规则只挡 `CFYXX-*.zip`，新包名的 27MB zip 处于「未忽略」状态，一次 `git add -A` 就会进历史。
 - **行尾**：`git ls-files --eol` 查出 `subscription_converter_test.dart` 是 `c417a28` 统一行尾时的漏网
   （index 仍为 CRLF），单独一个纯行尾提交补上；现全仓 index 无 CRLF/mixed。
-- **拆文件**：`config_tab.dart` 抽出 `config_entries.dart`（订阅器/订阅链接条目纯解析，
+- **拆文件（第一批）**：`config_tab.dart` 抽出 `config_entries.dart`（订阅器/订阅链接条目纯解析，
   新增 `config_entries_test.dart` 12 条，含「备注含 `://`」「节点链接不拼备注」「拆拼往返」）与
   `config_item_widgets.dart`（卡片/编辑弹窗/批量小标签/批量粘贴，仅把 State 的 `context` 变显式参数）。
-  1383 → 1069 行。`_compactTextField` 与定时/GitHub/Webhook/WebDAV 区块留在原文件：与 `_save`、
-  控制器回填同生命周期，硬拆会踩 `ref.listenManual` 那个坑。
+  1383 → 1069 行。
+- **拆文件（第二批）**：`results_tab.dart` 迁出 `result_edit_dialog.dart`（编辑节点弹窗，`ref` 与
+  `_saveEdits` 以参数传入，校验与 toast 语义不变）、`result_raw_view.dart`（原始内容视图，控制器仍归
+  State，`onChanged` 回调让父级重建以刷新「全部复制」按钮可用态）、`landing_history_dialog.dart`
+  （落地历史面板，连文档注释一起搬）。1309 → 1032 行；顺带删掉空转的 `core/net/endpoint.dart` 与
+  `core/net/landing_history.dart` import——`unused_import` 是 warning 级，留着就打破 0 warning 基线。
+- **拆文件（决定不做）**：`subscriptions_state.dart`（964 行）不拆；两个 UI 文件剩下的部分
+  （`_compactTextField`、视图切换、工具栏、快照与推送流程）与 `_save`、控制器回填、`_rawView`/`_restoring`
+  同生命周期，硬拆只是把耦合换成一大串参数，还会碰 `ref.listenManual` 那个坑。理由记在 PROJECT_OVERVIEW §9。
 - **测试稳定性**：全量并行跑偶发 `pipeline_reliability_test` 在 tearDown 删临时目录时抛
   `PathAccessException errno=32`（Windows 句柄未释放），单跑恒过。新增 `test/helpers/temp_dir.dart`
   的 `removeTempDir`（重试后放弃），5 个纯 `test()` 文件的 9 处清理改用它；
-  3 个 widget 测试文件的 4 处**不改**——`testWidgets` 的 fake async 区里 `Future.delayed` 不 pump 就超时。
+  3 个 widget 测试文件的 4 处**不改**——`testWidgets` 的 fake async 区里 `Future.delayed`
+  要靠 `pump` 才走，加进去直接超时。
 
 ## 验证状态
 
-- `flutter test`：**348/348 通过**（38 个测试文件，2026-10-06 本轮最终全量）。
-- `flutter analyze --no-fatal-infos`：**0 error、0 warning、204 info**，退出码 0。
+- `flutter test`：**348/348 通过**（38 个测试文件；两批拆分前后各跑一次全量）。
+- `flutter analyze --no-fatal-infos`：**0 error、0 warning、204 info**，退出码 0（拆分前后条数一致）。
 - `git diff --check`：通过；`git ls-files --eol`：index 与工作区均无 CRLF/mixed。
-- 中间提交可编译性是**实测**的：临时 worktree 检出「core 提交但不含 features」得到
-  analyze 退出码 1 + `reliability_test` 加载失败（`ResultRow.evidence`、`ResultState.qualityIssue`
-  等符号双向依赖），故放弃 core/UI 两刀切法，合为一个已验证的提交。
-- 本轮未重新构建 Windows Release、未重新打包便携包：便携包是 10-02 23:00 的产物，
-  其后的改动（10-03 编辑轮 + 本轮拆分）**不在包里**；本轮只改了 UI 文件的组织方式，
-  未改行为，但包与仓库已有差异这一事实需要知道。
+- 中间提交可编译性是**实测**的：临时 worktree 检出「core 提交但不含 features」得到 analyze 退出码 1 +
+  `reliability_test` 加载失败（`ResultRow.evidence`、`ResultState.qualityIssue` 等符号双向依赖），
+  故放弃 core/UI 两刀切法，合为一个已验证的提交。
+- 拆分只改文件组织、未改行为；判据是同一套 348 条用例（含 `results_tab_test`、`result_editing_test`、
+  `results_landing_history_test`、`ip_count_box_test`、`config_tab_test`、`config_backfill_test`）保持全绿。
 
 ## 边界（没做）
 
@@ -43,18 +50,21 @@
   `refactor/hardening`、`feat/subscription-latency-ux`、`wip/ui-on-main-backup` 全部原样保留。
 - 没有 push、没有打 tag、没有 GitHub Release。
 - 没有升级依赖、没有改产品行为、没有新增配置字段。
-- `results_tab.dart`（1309 行）与 `subscriptions_state.dart`（964 行）未拆。
-- 本轮记录用文字与提交说明留存，未做原生窗口逐项视觉验收。
+- 未做原生窗口逐项视觉验收（控件与异常路径靠 Flutter 用例覆盖）。
 
 ## 提交列表（push-clean，未推送）
 
 | 提交 | 内容 |
 |---|---|
-| `4540f2f` | chore: 版本升至 1.1.0+2，固定 CI SDK 并新增便携打包脚本 |
+| `4540f2f` | chore: 版本 1.1.0+2、CI 钉 SDK、便携打包脚本、gitignore 堵二进制 |
 | `8c58b0e` | feat: 1.1.0+2 可靠性轮与结果页编辑（进度取消、推送门槛、安全读写、撤销重做） |
 | `fd51090` | docs: 收敛为 README + PROJECT_OVERVIEW 两份活文档，历史内容归档 |
 | `9e2b494` | chore: 补漏——把最后一个 CRLF 入库文件统一为 LF |
-| `cba6d11` | refactor: 配置页拆出条目解析与条目控件，1383 行降到 1069 行并给解析逻辑补单测 |
+| `cba6d11` | refactor: 配置页拆出条目解析与条目控件，1383 → 1069 行，解析逻辑补 12 条直测 |
 | `780f1d6` | test: 临时目录清理改为容忍 Windows 句柄占用，全量跑不再偶发假失败 |
 
-（`cba6d11` 的说明里写的「1021 行」是当时按删除行数推算的错值，实际为 1069 行。）
+（`cba6d11` 的说明里「1021 行」是当时按删除行数推算的错值，实际 1069 行；未 amend，以本文件为准。）
+
+## 重新出包
+
+（待补：按当前代码重新构建 Windows Release 与便携包后，填写产物名、大小、SHA-256 与启动核验结果。）

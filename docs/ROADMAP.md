@@ -86,7 +86,8 @@
 ### 3.4 代码减债（与 3.1~3.3 同期穿插）
 
 - `config_tab.dart`（1322 行）按区块拆为多文件（订阅/落地检测/GitHub/Webhook/WebDAV/外观各一），行为不变，靠现有 `config_tab_test.dart` 保护。**部分完成（2026-10-06）**：纯解析逻辑进 `config_entries.dart`、条目卡片/编辑弹窗/批量控件进 `config_item_widgets.dart`，1383 → 1069 行。剩下的区块构建方法与 `_save`、控制器回填同生命周期，拆成独立子 widget 要先解决 §10 的 `ref.listenManual` 回填坑，不建议顺手做。
-- `results_tab.dart`（839 行）把表格、筛选芯片、导出抽成独立组件。**已部分失效**：筛选芯片随功能删除；文件现为 1309 行（新增行编辑、整段原始内容编辑、撤销/重做、落地历史、快照恢复），拆分前应先按当前职责重新列清单。
+- `results_tab.dart`（839 行）把表格、筛选芯片、导出抽成独立组件。**已按现状处理（2026-10-06）**：筛选芯片随功能删除；文件涨到 1309 行后拆出 `result_edit_dialog.dart`（编辑节点弹窗）、`result_raw_view.dart`（原始内容视图）、`landing_history_dialog.dart`（落地历史面板），1309 → 1032 行。表格 `ResultTable` 与导出按钮本就在独立文件/自成一体；`build()` 里剩下的工具栏与视图切换咬着 `_rawView`/`_restoring`/`_saveEdits`，不再硬拆。
+- `subscriptions_state.dart`（964 行）**决定不拆**：单一编排类，`_begin`/`_progress`/`_finish`/`cancel` 与流水线互斥、固定本轮配置、取消语义互相咬合，跨文件拆只是把耦合换成一大串参数。
 
 **P1 验收**：一键流水线可从点击到 GitHub 推送全程无人值守；落地检测有进度条与重试；`flutter test` ≥ 300 用例全绿。
 
