@@ -138,19 +138,25 @@ class _ResultTableState extends State<ResultTable> {
   }
 
   Widget _dataRow(BuildContext context, int index, ResultRow row, List<TableColumnWidth> colWidths, {bool showDragHandle = false}) {
-    return _DataRowWidget(
+    // key 必须挂在 animate() 之外的 KeyedSubtree 上：`.animate()` 返回的是 Animate widget，
+    // key 留在内层 _DataRowWidget 上的话 ReorderableListView 看不到 key，
+    // 进入编辑模式（走拖拽排序列表）就会抛「Every item of ReorderableListView must have a key」，
+    // 整行操作列渲染不出来，点行也打不开编辑弹窗。
+    return KeyedSubtree(
       key: ValueKey('${row.ipPort}_$index'),
-      index: index,
-      row: row,
-      colWidths: colWidths,
-      editMode: widget.editMode,
-      showDragHandle: showDragHandle,
-      onEdit: widget.onEdit != null ? () => widget.onEdit!.call(index) : null,
-      onDelete: widget.onDelete != null ? () => widget.onDelete!.call(index) : null,
-    )
-        .animate(delay: Motion.staggerDelay(index))
-        .fadeIn(duration: Motion.staggerDur, curve: Motion.curveStandard)
-        .slideX(begin: 0.03, end: 0, duration: Motion.staggerDur, curve: Motion.curveStandard);
+      child: _DataRowWidget(
+        index: index,
+        row: row,
+        colWidths: colWidths,
+        editMode: widget.editMode,
+        showDragHandle: showDragHandle,
+        onEdit: widget.onEdit != null ? () => widget.onEdit!.call(index) : null,
+        onDelete: widget.onDelete != null ? () => widget.onDelete!.call(index) : null,
+      )
+          .animate(delay: Motion.staggerDelay(index))
+          .fadeIn(duration: Motion.staggerDur, curve: Motion.curveStandard)
+          .slideX(begin: 0.03, end: 0, duration: Motion.staggerDur, curve: Motion.curveStandard),
+    );
   }
 
   Widget _sortHeader(BuildContext context, String label, int col) {
@@ -199,7 +205,6 @@ class _DataRowWidget extends StatefulWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
   const _DataRowWidget({
-    super.key,
     required this.index,
     required this.row,
     required this.colWidths,
