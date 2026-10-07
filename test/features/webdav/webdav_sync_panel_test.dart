@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../helpers/temp_dir.dart';
 
 class _MemAdapter implements dio_pkg.HttpClientAdapter {
   final files = <String, List<int>>{};
@@ -193,13 +194,12 @@ void main() {
     // testWidgets 的 fake async zone 中 dart:io 真实 IO 会挂起，
     // 此处用 404 全跳过场景验证 UI 流程闭环。
     final dir = await tester.runAsync(
-            () => Directory.systemTemp.createTemp('cfnb_webdav_ui')) ??
-        Directory.systemTemp;
-    addTearDown(() async {
-      try {
-        await dir.delete(recursive: true);
-      } catch (_) {}
-    });
+      () => Directory.systemTemp.createTemp('cfnb_webdav_ui'),
+    );
+    // 拿不到本次专用临时目录就直接失败：原先 `?? Directory.systemTemp` 的回退
+    // 会让 tearDown 去删系统临时目录根，靠 catch 吞掉错误只是没炸而已。
+    if (dir == null) throw StateError('临时目录创建失败，拒绝回退到 %TEMP% 根目录');
+    addTearDown(() => removeTempDir(dir));
     PathProviderPlatform.instance = _FakePathProvider(dir.path);
     final adapter = _MemAdapter(); // 云盘为空 → 全部 404
     await pumpApp(

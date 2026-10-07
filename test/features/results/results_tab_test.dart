@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../helpers/temp_dir.dart';
 
 class _FakePathProvider extends PathProviderPlatform {
   final String dir;
@@ -180,16 +181,7 @@ void main() {
           .runAsync(() => ConfigRepository.init(secure: InMemorySecureKv())))!;
       final dir = (await tester
           .runAsync(() => Directory.systemTemp.createTemp('cfnb_test')))!;
-      addTearDown(() async {
-        for (var attempt = 0; attempt < 5; attempt++) {
-          try {
-            await dir.delete(recursive: true);
-            return;
-          } catch (_) {
-            await Future<void>.delayed(const Duration(milliseconds: 100));
-          }
-        }
-      });
+      addTearDown(() => removeTempDir(dir));
 
       PathProviderPlatform.instance = _FakePathProvider(dir.path);
       File('${dir.path}/addressesapi.txt')
@@ -226,7 +218,7 @@ void main() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       final dir = await Directory.systemTemp.createTemp('cfnb_test');
-      addTearDown(() => dir.delete(recursive: true));
+      addTearDown(() => removeTempDir(dir));
       File('${dir.path}/fallback.txt')
           .writeAsStringSync('9.9.9.9:443#US fallback 10.00 ms\n');
 

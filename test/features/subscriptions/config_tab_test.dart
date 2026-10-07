@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../helpers/temp_dir.dart';
 
 class _FakePathProvider extends PathProviderPlatform {
   final String dir;
@@ -38,9 +39,7 @@ void main() {
     tearDown(() async {
       // 让 tearDown 阶段残留的异步任务（防抖保存/重载）完成，避免进程挂起
       await Future<void>.delayed(const Duration(milliseconds: 200));
-      try {
-        await dir.delete(recursive: true);
-      } catch (_) {}
+      await removeTempDir(dir);
     });
 
     Future<void> pumpTab(WidgetTester tester, {AppConfig? cfg}) async {
